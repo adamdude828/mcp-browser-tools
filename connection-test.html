@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Socket.IO Connection Test</title>
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+</head>
+<body>
+  <h1>Socket.IO Connection Test</h1>
+  <button id="connectBtn">Connect to localhost:3000</button>
+  <pre id="logs" style="background-color: #f0f0f0; padding: 10px; margin-top: 20px; height: 300px; overflow: auto;"></pre>
+
+  <script>
+    const logsElement = document.getElementById('logs');
+    const connectBtn = document.getElementById('connectBtn');
+    let socket;
+
+    function log(message) {
+      const timestamp = new Date().toISOString().split('T')[1].substring(0, 8);
+      logsElement.textContent += `[${timestamp}] ${message}\n`;
+      console.log(message);
+    }
+
+    connectBtn.addEventListener('click', () => {
+      log('Attempting to connect to http://localhost:3000...');
+      
+      // First check server status
+      fetch('http://localhost:3000/status')
+        .then(response => {
+          if (response.ok) {
+            return response.json();
+          }
+          throw new Error(`Server returned status ${response.status}`);
+        })
+        .then(data => {
+          log(`Server status OK: ${JSON.stringify(data)}`);
+          connectSocket();
+        })
+        .catch(error => {
+          log(`HTTP Status check failed: ${error.message}`);
+        });
+    });
+
+    function connectSocket() {
+      // Create Socket.IO connection
+      try {
+        socket = io('http://localhost:3000', {
+          transports: ['websocket', 'polling'],
+          reconnectionAttempts: 3,
+          reconnectionDelay: 1000,
+          timeout: 5000
+        });
+
+        // Connection events
+        socket.on('connect', () => {
+          log(`Connected! Socket ID: ${socket.id}`);
+          
+          // Request connection info
+          socket.emit('get-connection-info', { requestId: Date.now().toString() });
+        });
+
+        socket.on('connection-info', (data) => {
+          log(`Received connection info: ${JSON.stringify(data)}`);
+        });
+
+        socket.on('connect_error', (error) => {
+          log(`Connection error: ${error.message}`);
+        });
+
+        socket.on('disconnect', (reason) => {
+          log(`Disconnected: ${reason}`);
+        });
+
+        socket.on('error', (error) => {
+          log(`Socket error: ${error}`);
+        });
+      } catch (error) {
+        log(`Error creating socket: ${error.message}`);
+      }
+    }
+  </script>
+</body>
+</html> 

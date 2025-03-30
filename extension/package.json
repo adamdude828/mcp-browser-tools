@@ -1,0 +1,8 @@
+{
+  "name": "browser-connect-extension",
+  "version": "0.1.0",
+  "description": "Chrome extension for browser-connect tool",
+  "private": true,
+  "author": "",
+  "license": "MIT"
+} 

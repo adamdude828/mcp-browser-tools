@@ -1,0 +1,32 @@
+{
+  "name": "browser-connect",
+  "version": "1.0.0",
+  "description": "Browser Connect - An MCP tool for browser tab interaction",
+  "scripts": {
+    "start": "cd http-server && npm start",
+    "start:http": "cd http-server && npm start",
+    "build": "cd http-server && npm run build",
+    "dev": "cd http-server && npm run dev",
+    "install:all": "npm install && cd http-server && npm install && cd ../extension && npm install"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/browser-connect.git"
+  },
+  "keywords": [
+    "mcp",
+    "browser",
+    "socketio",
+    "chrome-extension"
+  ],
+  "author": "",
+  "license": "MIT",
+  "workspaces": [
+    "http-server",
+    "extension"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.8.0",
+    "zod": "^3.24.2"
+  }
+}

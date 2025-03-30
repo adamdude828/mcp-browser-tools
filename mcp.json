@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "browser_connect": {
+      "command": "npm",
+      "args": ["start"],
+      "env": {}
+    }
+  }
+}

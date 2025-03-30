@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Connect",
+  "version": "0.1.0",
+  "description": "Connect browser to AI agents by sharing tab information",
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "storage",
+    "webRequest",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost:*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {},
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src * 'self' http://* https://* ws://* wss://*"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["socket.io.min.js", "window.html"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "toggle-selection-mode": {
+      "suggested_key": {
+        "default": "Alt+S",
+        "mac": "Alt+S"
+      },
+      "description": "Toggle element selection mode"
+    }
+  },
+  "minimum_chrome_version": "116"
+} 

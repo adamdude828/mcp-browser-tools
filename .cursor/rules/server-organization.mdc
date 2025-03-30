@@ -1,0 +1,76 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Server Organization
+
+This document outlines the structure and organization for the MCP server and HTTP server components.
+
+## MCP Server (`mcp-server/`)
+
+The MCP Server handles the Model Context Protocol implementation and defines the available tools.
+
+### Directory Structure
+
+```
+mcp-server/
+├── package.json         # Dependencies for MCP server
+├── tsconfig.json        # TypeScript config
+├── mcp-server.ts        # Main entry point for MCP server
+├── src/
+│   ├── core/            # Core MCP functionality
+│   │   ├── tools/       # Tool implementations
+│   │   │   ├── hello.ts
+│   │   │   ├── goodbye.ts
+│   │   │   └── ...
+│   │   └── index.ts     # Exports tools
+│   └── server/          # Server implementation
+│       ├── server.ts    # Main MCP server setup
+│       └── index.ts     # MCP server exports
+```
+
+## HTTP Server (`http-server/`)
+
+The HTTP Server provides endpoints for browser extensions to connect to the MCP server.
+
+### Directory Structure
+
+```
+http-server/
+├── package.json         # Dependencies for HTTP server
+├── tsconfig.json        # TypeScript config
+├── src/
+│   ├── index.ts         # Main entry point and server setup
+│   ├── endpoints/       # HTTP endpoint handlers
+│   │   ├── sse.ts       # SSE connection handler
+│   │   ├── messages.ts  # Message handler
+│   │   ├── health.ts    # Health check endpoint
+│   │   └── root.ts      # Root info endpoint
+│   ├── middleware/      # Express middleware
+│   │   ├── cors.ts      # CORS configuration
+│   │   └── logging.ts   # Request logging
+│   ├── services/        # Service layer
+│   │   └── mcp-client.ts # MCP client to communicate with MCP server
+│   └── utils/           # Utility functions
+│       ├── session.ts   # Session management
+│       └── error.ts     # Error handling
+```
+
+## HTTP Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/sse` | GET | Establishes SSE connections and assigns session IDs |
+| `/messages` | POST | Receives messages from clients and routes to MCP handlers |
+| `/health` | GET | Health check endpoint for server status |
+| `/` | GET | Root endpoint for basic server information |
+
+## Communication Flow
+
+1. Browser extension connects to HTTP Server via SSE endpoint
+2. HTTP Server assigns a session ID
+3. Browser extension sends messages to HTTP Server
+4. HTTP Server routes messages to MCP Server
+5. MCP Server processes messages and returns responses
+6. HTTP Server forwards responses back to browser extension 

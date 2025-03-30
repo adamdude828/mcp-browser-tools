@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "browser-connect1": {
+      "url": "http://localhost:3000/sse"
+    }
+  }
+} 
