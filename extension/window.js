@@ -53,6 +53,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clearSelectionsBtn').addEventListener('click', clearAllElements);
   document.getElementById('reloadZonesBtn').addEventListener('click', reloadZones);
   
+  // Listen for custom refresh zones event from socket handler
+  window.addEventListener('browser-connect-refresh-zones', (event) => {
+    uiUpdater.log(`Received server request to refresh zones (requestId: ${event.detail.requestId})`);
+    reloadZones();
+  });
+  
   // Listen for socket-emit messages from content scripts via background script
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Debug all messages received to diagnose the zone issue

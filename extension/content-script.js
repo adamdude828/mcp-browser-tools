@@ -627,10 +627,17 @@ function injectElementSelector() {
         chrome.runtime.sendMessage({ type: 'get-server-url' }, (response) => {
           if (response && response.serverUrl) {
             const serverUrl = response.serverUrl;
+            console.log(`🔍 DEBUG: Got server URL: ${serverUrl}`);
+            
+            // Full URL for logging
+            const apiUrl = `${serverUrl}/api/zones/${elementId}/html`;
+            console.log(`🔍 DEBUG: Will send full HTML to endpoint: ${apiUrl}`);
             
             // Send the full HTML via fetch API with exponential backoff retry
             const sendFullHtml = (retryCount = 0, maxRetries = 3, delay = 1000) => {
-              fetch(`${serverUrl}/api/zones/${elementId}/html`, {
+              console.log(`🔍 DEBUG: Attempt ${retryCount + 1} to send full HTML (${fullHtml.length} chars) to ${apiUrl}`);
+              
+              fetch(apiUrl, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json'
@@ -639,18 +646,46 @@ function injectElementSelector() {
                   html: fullHtml
                 })
               })
-              .then(response => response.json())
+              .then(response => {
+                console.log(`🔍 DEBUG: Received response with status: ${response.status}`);
+                
+                // Check if the response is OK before trying to parse JSON
+                if (!response.ok) {
+                  throw new Error(`Server responded with status ${response.status}: ${response.statusText}`);
+                }
+                
+                // Try to parse JSON, but handle potential errors
+                return response.text().then(text => {
+                  console.log(`🔍 DEBUG: Response text: ${text}`);
+                  try {
+                    return JSON.parse(text);
+                  } catch (e) {
+                    console.error(`🚨 ERROR: Failed to parse JSON response: ${e.message}`);
+                    console.log(`🔍 DEBUG: Raw response: ${text}`);
+                    throw new Error('Invalid JSON response');
+                  }
+                });
+              })
               .then(data => {
                 console.log(`🔍 DEBUG: Full HTML sent successfully:`, data);
               })
               .catch(error => {
-                console.error(`🚨 ERROR: Failed to send full HTML:`, error);
+                console.error(`🚨 ERROR: Failed to send full HTML:`, error.message || error);
+                
+                // Log additional information to help debug
+                console.log(`🔍 DEBUG Details for failed HTML send:`);
+                console.log(`  URL: ${apiUrl}`);
+                console.log(`  Element ID: ${elementId}`);
+                console.log(`  HTML Length: ${fullHtml.length} chars`);
+                console.log(`  Retry count: ${retryCount} of ${maxRetries}`);
                 
                 // Retry with exponential backoff
                 if (retryCount < maxRetries) {
                   const nextDelay = delay * 2;
                   console.log(`🔍 DEBUG: Retrying in ${delay}ms (${retryCount + 1}/${maxRetries})`);
                   setTimeout(() => sendFullHtml(retryCount + 1, maxRetries, nextDelay), delay);
+                } else {
+                  console.log(`🔍 DEBUG: Max retries (${maxRetries}) reached, giving up on sending HTML`);
                 }
               });
             };

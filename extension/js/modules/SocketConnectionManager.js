@@ -285,6 +285,24 @@ class SocketConnectionManager {
       });
     });
     
+    // Handle refresh-zones events from server
+    this.socket.on('refresh-zones', (data) => {
+      this.logCallback('Received refresh-zones request', data);
+      
+      // Call the reloadZones function from window.js through a custom event
+      const customEvent = new CustomEvent('browser-connect-refresh-zones', {
+        detail: { requestId: data.requestId }
+      });
+      window.dispatchEvent(customEvent);
+      
+      // Send acknowledgment back to server
+      this.socket.emit('refresh-zones-ack', {
+        requestId: data.requestId,
+        success: true,
+        timestamp: Date.now()
+      });
+    });
+    
     /* JavaScript execution functionality removed temporarily */
   }
 }

@@ -116,7 +116,12 @@ app.post("/api/zones/:elementId/html", jsonParser, async (req: Request, res: Res
     const { elementId } = req.params;
     const { html, socketId } = req.body;
     
+    console.log(`[SERVER] Received HTML update request for zone: ${elementId}`);
+    console.log(`[SERVER] HTML content length: ${html ? html.length : 'undefined'} characters`);
+    console.log(`[SERVER] Socket ID specified: ${socketId || 'none'}`);
+    
     if (!elementId || !html) {
+      console.log(`[SERVER] Missing required parameters: elementId=${!!elementId}, html=${!!html}`);
       return res.status(400).json({ 
         success: false, 
         message: 'Missing elementId or html in request' 
@@ -125,13 +130,16 @@ app.post("/api/zones/:elementId/html", jsonParser, async (req: Request, res: Res
     
     // If socketId is provided, update HTML for that specific socket's zone
     if (socketId) {
+      console.log(`[SERVER] Attempting to update HTML for specific socket: ${socketId}`);
       const updated = tabManager.updateZoneHtml(socketId, elementId, html);
       if (updated) {
+        console.log(`[SERVER] Successfully updated HTML for zone ${elementId} (socket: ${socketId})`);
         return res.json({ 
           success: true, 
           message: `Updated HTML for zone ${elementId}` 
         });
       } else {
+        console.log(`[SERVER] Failed to update HTML: Zone ${elementId} not found for socket ${socketId}`);
         return res.status(404).json({ 
           success: false, 
           message: `Zone ${elementId} not found for socket ${socketId}` 
@@ -140,13 +148,16 @@ app.post("/api/zones/:elementId/html", jsonParser, async (req: Request, res: Res
     } 
     
     // Otherwise, try to update any matching zone across all sockets
+    console.log(`[SERVER] No specific socket ID provided, trying to update any matching zone`);
     const updated = tabManager.updateAnyZoneHtml(elementId, html);
     if (updated) {
+      console.log(`[SERVER] Successfully updated HTML for zone ${elementId} (across all sockets)`);
       return res.json({ 
         success: true, 
         message: `Updated HTML for zone ${elementId}` 
       });
     } else {
+      console.log(`[SERVER] Failed to update HTML: Zone ${elementId} not found in any socket`);
       return res.status(404).json({ 
         success: false, 
         message: `Zone ${elementId} not found` 

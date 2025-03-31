@@ -3,6 +3,7 @@ import {
   registerTabTitleTool, 
   registerBrowserZonesTool, 
   registerBrowserZoneDetailsTool,
+  registerBrowserRefreshZonesTool,
   setupTabSocketHandlers 
 } from "./tabs.js";
 import { registerScreenshotTools } from "./screenshots.js";
@@ -18,6 +19,7 @@ export function registerAllTools(server: McpServer): void {
   // Register the browser zones tools
   registerBrowserZonesTool(server);
   registerBrowserZoneDetailsTool(server);
+  registerBrowserRefreshZonesTool(server);
   
   // Register screenshot tools
   registerScreenshotTools(server);
@@ -28,5 +30,6 @@ export {
   registerTabTitleTool,
   registerBrowserZonesTool,
   registerBrowserZoneDetailsTool,
+  registerBrowserRefreshZonesTool,
   setupTabSocketHandlers 
 }; 

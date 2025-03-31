@@ -234,6 +234,64 @@ export function registerBrowserZoneDetailsTool(server: McpServer): void {
 }
 
 /**
+ * Registers the browser refresh zones tool with the MCP server
+ * @param server The MCP server instance
+ */
+export function registerBrowserRefreshZonesTool(server: McpServer): void {
+  // Trigger a refresh of all zones in the browser
+  server.tool(
+    "browser_refresh_zones",
+    { random_string: z.string().optional() },
+    async () => {
+      console.log(`[SERVER] Refreshing all browser zones...`);
+      
+      // Get all active sockets and send a refresh-zones event to them
+      const activeSockets = tabManager.getActiveSockets();
+      const socketCount = activeSockets.length;
+      
+      console.log(`[SERVER] Sending refresh-zones event to ${socketCount} active sockets`);
+      
+      if (socketCount === 0) {
+        return {
+          content: [{ 
+            type: "text", 
+            text: JSON.stringify({
+              success: false,
+              message: "No active browser connections available for refreshing zones",
+              refreshed: 0
+            })
+          }]
+        };
+      }
+      
+      // Send refresh-zones event to all active sockets
+      let successCount = 0;
+      for (const socket of activeSockets) {
+        try {
+          const requestId = Date.now().toString() + Math.random().toString(36).substring(2, 15);
+          socket.emit('refresh-zones', { requestId });
+          successCount++;
+        } catch (error) {
+          console.error(`[SERVER] Error sending refresh-zones event to socket:`, error);
+        }
+      }
+      
+      // Return success response
+      return {
+        content: [{ 
+          type: "text", 
+          text: JSON.stringify({
+            success: true,
+            message: `Successfully requested zone refresh from ${successCount} of ${socketCount} browser connections`,
+            refreshed: successCount
+          })
+        }]
+      };
+    }
+  );
+}
+
+/**
  * Registers the browser zone delete tool with the MCP server
  * @param server The MCP server instance
  */

@@ -275,17 +275,36 @@ class TabManager {
   }
   
   /**
-   * Update HTML content for a specific zone by socket ID and element ID
+   * Update HTML content for a zone in a specific socket
    * @param socketId The socket ID
    * @param elementId The element ID
    * @param html The HTML content
    * @returns True if updated successfully, false if zone not found
    */
   updateZoneHtml(socketId: string, elementId: string, html: string): boolean {
+    console.log(`[TabManager] Updating HTML for zone ${elementId} (socket: ${socketId})`);
+    
+    // Check if the socket exists first
+    if (!this.zones.has(socketId)) {
+      console.log(`[TabManager] Socket ${socketId} not found in zones map`);
+      return false;
+    }
+    
     const zones = this.zones.get(socketId) || [];
+    console.log(`[TabManager] Socket ${socketId} has ${zones.length} zones`);
+    
     const zoneIndex = zones.findIndex(zone => zone.elementId === elementId);
+    console.log(`[TabManager] Search result for zone ${elementId}: index=${zoneIndex}`);
     
     if (zoneIndex === -1) {
+      console.log(`[TabManager] Zone ${elementId} not found for socket ${socketId}`);
+      
+      // Log available zones to help debug
+      if (zones.length > 0) {
+        console.log(`[TabManager] Available zones for socket ${socketId}:`, 
+          zones.map(z => ({ elementId: z.elementId, label: z.label })));
+      }
+      
       return false;
     }
     
@@ -293,7 +312,7 @@ class TabManager {
     zones[zoneIndex].html = html;
     this.zones.set(socketId, zones);
     
-    console.log(`TabManager: Updated HTML for zone ${elementId} (socket: ${socketId}), HTML length: ${html.length}`);
+    console.log(`[TabManager] Successfully updated HTML for zone ${elementId} (socket: ${socketId}), HTML length: ${html.length}`);
     return true;
   }
   
@@ -304,10 +323,19 @@ class TabManager {
    * @returns True if at least one zone was updated, false if no matching zones
    */
   updateAnyZoneHtml(elementId: string, html: string): boolean {
+    console.log(`[TabManager] Attempting to update HTML for any zone with ID ${elementId} across all sockets`);
+    
+    // Log the number of sockets we're searching through
+    console.log(`[TabManager] Searching through ${this.zones.size} socket(s) for zone ${elementId}`);
+    
     let updated = false;
+    let checkedSockets = 0;
     
     // Check all sockets for the matching element ID
     for (const [socketId, zones] of this.zones.entries()) {
+      checkedSockets++;
+      console.log(`[TabManager] Checking socket ${socketId} (${zones.length} zones)...`);
+      
       const zoneIndex = zones.findIndex(zone => zone.elementId === elementId);
       
       if (zoneIndex !== -1) {
@@ -316,11 +344,33 @@ class TabManager {
         this.zones.set(socketId, zones);
         updated = true;
         
-        console.log(`TabManager: Updated HTML for zone ${elementId} (socket: ${socketId}), HTML length: ${html.length}`);
+        console.log(`[TabManager] Found and updated zone ${elementId} in socket ${socketId}, HTML length: ${html.length}`);
+      } else {
+        console.log(`[TabManager] Zone ${elementId} not found in socket ${socketId}`);
       }
     }
     
+    if (!updated) {
+      console.log(`[TabManager] Zone ${elementId} not found in any socket (checked ${checkedSockets} sockets)`);
+    }
+    
     return updated;
+  }
+  
+  /**
+   * Get all active socket instances
+   * @returns Array of active Socket instances
+   */
+  getActiveSockets(): Socket[] {
+    const activeSockets: Socket[] = [];
+    
+    for (const [socketId, socket] of this.sockets.entries()) {
+      if (socket && socket.connected) {
+        activeSockets.push(socket);
+      }
+    }
+    
+    return activeSockets;
   }
 }
 
