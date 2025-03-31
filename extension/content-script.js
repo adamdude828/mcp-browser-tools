@@ -1,363 +1,176 @@
-// Element Selection and Highlighting for Browser Connect
-let selectionMode = false;
-let currentHighlightedElement = null;
-let selectedElements = new Map(); // Map to store labeled elements (elementId -> {element, label})
-let nextElementId = 1;
+// Browser Connect Content Script
+// This script manages element selection and highlighting in the browser tab
+// It uses modularized components to handle different responsibilities
 
-// Styles for highlighting elements
-const styles = `
-  .browser-connect-highlight {
-    outline: 2px solid #2196F3 !important;
-    outline-offset: 1px !important;
-    position: relative !important;
-  }
-  
-  .browser-connect-selected {
-    outline: 2px solid #4CAF50 !important;
-    outline-offset: 1px !important;
-    position: relative !important;
-  }
-  
-  .browser-connect-label {
-    position: absolute;
-    top: -25px;
-    left: 0;
-    background-color: #4CAF50;
-    color: white;
-    padding: 2px 5px;
-    border-radius: 3px;
-    font-size: 12px;
-    z-index: 10000;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  }
-  
-  .browser-connect-modal {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background-color: white;
-    padding: 20px;
-    border-radius: 5px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    z-index: 10001;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    width: 300px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  }
-  
-  .browser-connect-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.5);
-    z-index: 10000;
-  }
-  
-  .browser-connect-modal input {
-    padding: 8px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-  }
-  
-  .browser-connect-modal button {
-    padding: 8px 16px;
-    background-color: #2196F3;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  
-  .browser-connect-modal button.cancel {
-    background-color: #f44336;
-  }
-  
-  .browser-connect-modal .buttons {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 10px;
-  }
-  
-  .browser-connect-console {
-    position: fixed;
-    bottom: 10px;
-    right: 10px;
-    background-color: rgba(0, 0, 0, 0.8);
-    color: #00ff00;
-    font-family: monospace;
-    padding: 10px;
-    border-radius: 5px;
-    max-width: 400px;
-    max-height: 200px;
-    overflow-y: auto;
-    z-index: 10000;
-    font-size: 12px;
-    line-height: 1.5;
-    transition: all 0.3s ease;
-  }
-  
-  .browser-connect-console-entry {
-    margin-bottom: 5px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-    padding-bottom: 5px;
-  }
-  
-  .browser-connect-console-entry.error {
-    color: #ff5555;
-  }
-  
-  .browser-connect-console-timestamp {
-    color: #aaaaaa;
-    font-size: 10px;
-    margin-right: 5px;
-  }
-  
-  .browser-connect-console-close {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    color: white;
-    cursor: pointer;
-    font-size: 14px;
-  }
-`;
+console.log('🔍 BROWSER CONNECT CONTENT SCRIPT LOADED', new Date().toISOString());
 
-// Inject styles
-function injectStyles() {
-  const styleElement = document.createElement('style');
-  styleElement.textContent = styles;
-  document.head.appendChild(styleElement);
-}
+// Global variable to track DOM readiness
+let domIsReady = false;
+let initializationAttempted = false;
 
-// Start selection mode
-function startSelectionMode() {
-  selectionMode = true;
-  document.body.style.cursor = 'crosshair';
-  console.log('Browser Connect: Element selection mode activated');
-  
-  // Add a visible indicator that selection mode is active
-  const indicator = document.createElement('div');
-  indicator.id = 'browser-connect-mode-indicator';
-  indicator.style.cssText = `
-    position: fixed;
-    top: 10px;
-    right: 10px;
-    background-color: rgba(33, 150, 243, 0.8);
-    color: white;
-    padding: 5px 10px;
-    border-radius: 3px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    z-index: 10000;
-    font-size: 12px;
-  `;
-  indicator.textContent = 'Selection Mode: ON';
-  document.body.appendChild(indicator);
-}
+// Initialize the element selector by loading ElementSelector directly 
+// instead of importing as module (which doesn't work with content scripts)
+let elementSelector;
 
-// Stop selection mode
-function stopSelectionMode() {
-  selectionMode = false;
-  document.body.style.cursor = '';
-  if (currentHighlightedElement) {
-    currentHighlightedElement.classList.remove('browser-connect-highlight');
-    currentHighlightedElement = null;
+// Global access for extension script functions - CRITICAL for access by executeScript
+window.browserConnectAPI = {
+  isReady: false,
+  toggleSelectionMode: function() {
+    console.log('🔍 DEBUG: Window API toggleSelectionMode called');
+    if (!elementSelector) {
+      console.error('🚨 ERROR: ElementSelector not available in window API');
+      return { success: false, error: 'ElementSelector not initialized' };
+    }
+    const result = elementSelector.toggleSelectionMode();
+    return { success: true, selectionMode: result };
+  },
+  getSelectedElements: function() {
+    if (!elementSelector) return { elements: [] };
+    return { elements: elementSelector.getSelectedElementsData() };
+  },
+  highlightElements: function() {
+    if (!elementSelector) return { success: false };
+    return { success: elementSelector.highlightAllSelectedElements() };
+  },
+  hideElements: function() {
+    if (!elementSelector) return { success: false };
+    return { success: elementSelector.hideAllSelectedElements() };
+  },
+  clearElements: function(reason) {
+    if (!elementSelector) return { success: false };
+    return { success: elementSelector.clearAllSelectedElements(reason || 'api-call') };
   }
-  
-  // Remove the indicator
-  const indicator = document.getElementById('browser-connect-mode-indicator');
-  if (indicator) {
-    document.body.removeChild(indicator);
-  }
-  
-  console.log('Browser Connect: Element selection mode deactivated');
-}
+};
 
-// Handle mouse movement for highlighting elements
-function handleMouseMove(event) {
-  if (!selectionMode) return;
+// Wait for DOM to be ready
+function waitForDOM(callback) {
+  console.log('🔍 DEBUG: Waiting for DOM to be ready');
   
-  // Ignore our own UI elements
-  if (event.target.closest('.browser-connect-modal, .browser-connect-overlay, .browser-connect-label, #browser-connect-mode-indicator')) {
+  // Check if document is already complete
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    console.log('🔍 DEBUG: DOM already ready, state:', document.readyState);
+    domIsReady = true;
+    callback();
     return;
   }
   
-  if (currentHighlightedElement) {
-    currentHighlightedElement.classList.remove('browser-connect-highlight');
-  }
-  
-  currentHighlightedElement = event.target;
-  currentHighlightedElement.classList.add('browser-connect-highlight');
+  // Otherwise wait for DOMContentLoaded event
+  console.log('🔍 DEBUG: Setting up DOMContentLoaded listener, current state:', document.readyState);
+  document.addEventListener('DOMContentLoaded', function domLoadedHandler() {
+    console.log('🔍 DEBUG: DOMContentLoaded event fired');
+    document.removeEventListener('DOMContentLoaded', domLoadedHandler);
+    domIsReady = true;
+    callback();
+  });
 }
 
-// Handle element selection
-function handleClick(event) {
-  if (!selectionMode) return;
-  
-  // Ignore our own UI elements
-  if (event.target.closest('.browser-connect-modal, .browser-connect-overlay, .browser-connect-label, #browser-connect-mode-indicator')) {
-    return;
+// Safely append child with checks
+function safeAppendToBody(element) {
+  if (!document || !document.body) {
+    console.error('🚨 ERROR: document.body not available for appendChild');
+    return false;
   }
   
-  // Prevent the click from triggering other elements
-  event.preventDefault();
-  event.stopPropagation();
-  
-  const selectedElement = event.target;
-  
-  // Show labeling modal
-  showLabelingModal(selectedElement);
+  try {
+    document.body.appendChild(element);
+    return true;
+  } catch (error) {
+    console.error('🚨 ERROR: Failed to append to body:', error.message);
+    return false;
+  }
 }
 
-// Show modal for labeling the selected element
-function showLabelingModal(element) {
-  // Create overlay
-  const overlay = document.createElement('div');
-  overlay.className = 'browser-connect-overlay';
+// Initialize the message handler
+function initializeMessageHandler() {
+  // Set up message listener
+  console.log('🔍 DEBUG: Content script - initializeMessageHandler called');
   
-  // Create modal
-  const modal = document.createElement('div');
-  modal.className = 'browser-connect-modal';
-  
-  // Create title
-  const title = document.createElement('h3');
-  title.textContent = 'Label this element';
-  title.style.margin = '0 0 10px 0';
-  
-  // Create input
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.placeholder = 'Enter a label';
-  
-  // Create buttons container
-  const buttonsContainer = document.createElement('div');
-  buttonsContainer.className = 'buttons';
-  
-  // Create confirm button
-  const confirmButton = document.createElement('button');
-  confirmButton.textContent = 'Save';
-  confirmButton.addEventListener('click', () => {
-    const label = input.value.trim() || 'Unlabeled';
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    console.log('🔍 DEBUG: Content script received message', message);
     
-    // First remove modal and overlay to avoid issues with element repositioning
-    try {
-      document.body.removeChild(overlay);
-      document.body.removeChild(modal);
-    } catch (e) {
-      console.error('Error removing modal:', e);
+    // Send an immediate acknowledgment of message receipt
+    if (message.type === 'content-script-ready-check') {
+      console.log('🔍 DEBUG: Responding to ready check');
+      sendResponse({ received: true, domReady: domIsReady, initialized: !!elementSelector });
+      return true;
     }
     
-    // Then label the element
-    labelElement(element, label);
-    stopSelectionMode();
-  });
-  
-  // Create cancel button
-  const cancelButton = document.createElement('button');
-  cancelButton.textContent = 'Cancel';
-  cancelButton.className = 'cancel';
-  cancelButton.addEventListener('click', () => {
-    try {
-      document.body.removeChild(overlay);
-      document.body.removeChild(modal);
-    } catch (e) {
-      console.error('Error removing modal:', e);
-    }
-    stopSelectionMode();
-  });
-  
-  // Add buttons to container
-  buttonsContainer.appendChild(confirmButton);
-  buttonsContainer.appendChild(cancelButton);
-  
-  // Add all elements to modal
-  modal.appendChild(title);
-  modal.appendChild(input);
-  modal.appendChild(buttonsContainer);
-  
-  // Add modal and overlay to the page
-  document.body.appendChild(overlay);
-  document.body.appendChild(modal);
-  
-  // Focus the input
-  input.focus();
-  
-  // Also handle Escape key to close the modal
-  const keyHandler = (e) => {
-    if (e.key === 'Escape') {
-      try {
-        document.body.removeChild(overlay);
-        document.body.removeChild(modal);
-      } catch (e) {
-        console.error('Error removing modal:', e);
+    // Always check if the content script is fully loaded and ready
+    if (!elementSelector) {
+      console.error('🚨 ERROR: ElementSelector not initialized yet');
+      
+      // Try to initialize now if we haven't tried before
+      if (domIsReady && !initializationAttempted) {
+        console.log('🔍 DEBUG: Attempting late initialization');
+        initializationAttempted = true;
+        injectElementSelector();
+        
+        // Still respond with error since we're not ready for this message yet
+        sendResponse({ success: false, error: 'ElementSelector being initialized, please retry' });
+      } else {
+        sendResponse({ success: false, error: 'ElementSelector not initialized' });
       }
-      stopSelectionMode();
-      document.removeEventListener('keydown', keyHandler);
+      return true;
     }
-  };
-  
-  document.addEventListener('keydown', keyHandler);
-}
-
-// Label and store the selected element
-function labelElement(element, label) {
-  // Remove highlight class
-  element.classList.remove('browser-connect-highlight');
-  // Add selected class
-  element.classList.add('browser-connect-selected');
-  
-  // Create a unique ID for this element
-  const elementId = `browser-connect-element-${nextElementId++}`;
-  element.dataset.browserConnectId = elementId;
-  
-  // Create label element
-  const labelElement = document.createElement('div');
-  labelElement.className = 'browser-connect-label';
-  labelElement.textContent = label;
-  
-  // Adjust position if element is at the top of the page
-  const rect = element.getBoundingClientRect();
-  if (rect.top < 30) {
-    labelElement.style.top = 'auto';
-    labelElement.style.bottom = '-25px';
-  }
-  
-  // Add label to element
-  element.style.position = 'relative';
-  element.appendChild(labelElement);
-  
-  // Store the element and its label
-  selectedElements.set(elementId, {
-    element,
-    label,
-    xpath: getXPath(element),
-    cssSelector: getCssSelector(element)
-  });
-  
-  // Send data to background script
-  chrome.runtime.sendMessage({
-    type: 'element-selected',
-    data: {
-      elementId,
-      label,
-      url: window.location.href,
-      xpath: getXPath(element),
-      cssSelector: getCssSelector(element),
-      innerText: element.innerText.substring(0, 100),
-      tagName: element.tagName
+    
+    if (message.type === 'toggle-selection-mode') {
+      console.log('🔍 DEBUG: Content script - toggle-selection-mode message received');
+      try {
+        const result = elementSelector.toggleSelectionMode();
+        console.log('🔍 DEBUG: Selection mode toggled to:', result);
+        sendResponse({ success: true, selectionMode: elementSelector.selectionMode });
+      } catch (error) {
+        console.error('🚨 ERROR: Failed to toggle selection mode:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+      return true;
     }
+    
+    if (message.type === 'get-selected-elements') {
+      const elements = elementSelector.getSelectedElementsData();
+      sendResponse({ elements });
+      return true;
+    }
+    
+    if (message.type === 'highlight-all-elements') {
+      elementSelector.highlightAllSelectedElements();
+      sendResponse({ success: true });
+      return true;
+    }
+    
+    if (message.type === 'hide-all-elements') {
+      elementSelector.hideAllSelectedElements();
+      sendResponse({ success: true });
+      return true;
+    }
+    
+    if (message.type === 'clear-selected-elements') {
+      elementSelector.clearAllSelectedElements('user-initiated');
+      sendResponse({ success: true });
+      return true;
+    }
+    
+    if (message.type === 'clear-all-highlights') {
+      elementSelector.clearElementHighlights();
+      sendResponse({ success: true });
+      return true;
+    }
+    
+    if (message.type === 'delete-element') {
+      elementSelector.deleteElement(message.elementId);
+      sendResponse({ success: true });
+      return true;
+    }
+    
+    return true;
   });
-  
-  console.log(`Browser Connect: Element labeled as "${label}"`);
 }
 
 // Get XPath for an element
 function getXPath(element) {
-  if (element.id !== '') {
+  if (!element) return '';
+  
+  if (element.id) {
     return `//*[@id="${element.id}"]`;
   }
   
@@ -366,147 +179,657 @@ function getXPath(element) {
   }
   
   let ix = 0;
-  const siblings = element.parentNode.childNodes;
+  const siblings = element.parentNode?.children || [];
   
   for (let i = 0; i < siblings.length; i++) {
     const sibling = siblings[i];
-    
     if (sibling === element) {
-      return `${getXPath(element.parentNode)}/${element.tagName.toLowerCase()}[${ix + 1}]`;
+      const path = getXPath(element.parentNode);
+      const tag = element.tagName.toLowerCase();
+      return `${path}/${tag}[${ix + 1}]`;
     }
     
     if (sibling.nodeType === 1 && sibling.tagName === element.tagName) {
       ix++;
     }
   }
+  
+  return '';
 }
 
-// Get CSS selector for an element
+// Get a unique CSS selector for an element
 function getCssSelector(element) {
+  if (!element) return '';
+  
   if (element.id) {
     return `#${element.id}`;
   }
   
-  if (element.className) {
-    const classes = Array.from(element.classList).map(c => `.${c}`).join('');
-    return classes;
+  if (element === document.body) {
+    return 'body';
   }
   
-  let selector = element.tagName.toLowerCase();
-  let parent = element.parentNode;
-  
-  if (parent && parent !== document.body) {
-    selector = `${getCssSelector(parent)} > ${selector}`;
-  }
-  
-  return selector;
-}
-
-// Listen for messages from the extension
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Browser Connect: Received message', message);
-  
-  if (message.type === 'toggle-selection-mode') {
-    console.log('Browser Connect: Toggle selection mode message received');
-    if (selectionMode) {
-      stopSelectionMode();
-    } else {
-      startSelectionMode();
+  // Try with classes if available
+  if (element.className && typeof element.className === 'string') {
+    const classes = element.className.split(/\s+/).filter(c => c);
+    if (classes.length) {
+      const selector = `.${classes.join('.')}`;
+      if (document.querySelectorAll(selector).length === 1) {
+        return selector;
+      }
     }
-    
-    // Important: Always send response back
-    sendResponse({ success: true, selectionMode });
-    console.log('Browser Connect: Toggled selection mode to', selectionMode);
-    return true; // Required to use sendResponse asynchronously
   }
   
-  if (message.type === 'get-selected-elements') {
-    const elements = Array.from(selectedElements.entries()).map(([id, data]) => ({
-      id,
-      label: data.label,
-      xpath: data.xpath,
-      cssSelector: data.cssSelector
-    }));
-    
-    console.log('Browser Connect: Returning selected elements', elements);
-    sendResponse({ elements });
-    return true; // Required to use sendResponse asynchronously
+  // Get a path
+  const path = [];
+  while (element.nodeType === Node.ELEMENT_NODE) {
+    let selector = element.nodeName.toLowerCase();
+    if (element.id) {
+      selector += `#${element.id}`;
+      path.unshift(selector);
+      break;
+    } else {
+      let sibling = element;
+      let nth = 1;
+      while (sibling.previousSibling) {
+        sibling = sibling.previousSibling;
+        if (sibling.nodeType === Node.ELEMENT_NODE && sibling.nodeName === element.nodeName) {
+          nth++;
+        }
+      }
+      if (nth > 1) {
+        selector += `:nth-of-type(${nth})`;
+      }
+    }
+    path.unshift(selector);
+    element = element.parentNode;
   }
   
-  if (message.type === 'console-log') {
-    // Display the console log message in the page
-    displayConsoleLog(message.data);
-    sendResponse({ success: true });
-    return true;
-  }
-  
-  // For any other message, send a default response
-  sendResponse({ success: false, error: 'Unknown message type' });
-  return true;
-});
+  return path.join(' > ');
+}
 
-// Function to display console log messages
-function displayConsoleLog(logData) {
-  // Format timestamp
-  const timestamp = new Date(logData.timestamp).toLocaleTimeString();
+// Load the ElementSelector script directly
+// This is a workaround for module loading issues in content scripts
+function injectElementSelector() {
+  console.log('🔍 DEBUG: Content script - injectElementSelector called');
   
-  // Create or find the console element
-  let consoleElement = document.querySelector('.browser-connect-console');
-  if (!consoleElement) {
-    consoleElement = document.createElement('div');
-    consoleElement.className = 'browser-connect-console';
-    
-    // Add close button
-    const closeButton = document.createElement('span');
-    closeButton.className = 'browser-connect-console-close';
-    closeButton.textContent = '×';
-    closeButton.addEventListener('click', () => {
-      document.body.removeChild(consoleElement);
-    });
-    
-    consoleElement.appendChild(closeButton);
-    document.body.appendChild(consoleElement);
+  // Check if we can access DOM safely
+  if (!document || !document.body) {
+    console.error('🚨 ERROR: Cannot initialize ElementSelector, document.body not available');
+    return;
   }
   
-  // Create a new log entry
-  const logEntry = document.createElement('div');
-  logEntry.className = 'browser-connect-console-entry';
-  if (logData.level === 'error') {
-    logEntry.classList.add('error');
-  }
+  // Create a simplified ElementSelector directly in the content script
+  elementSelector = {
+    selectionMode: false,
+    selectedElements: new Map(),
+    nextElementId: 1,
+    highlightedElement: null,
+    
+    // Setup mouse event listeners
+    setupEventListeners() {
+      document.addEventListener('mousemove', this.handleMouseMove.bind(this));
+      document.addEventListener('click', this.handleClick.bind(this), true); // Capture phase
+    },
+    
+    // Remove event listeners
+    removeEventListeners() {
+      document.removeEventListener('mousemove', this.handleMouseMove.bind(this));
+      document.removeEventListener('click', this.handleClick.bind(this), true);
+    },
+    
+    // Handle socket messages via background script
+    setupSocketMessageHandler() {
+      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        // Handle socket messages forwarded by the background script
+        if (message.type === 'socket-message') {
+          if (message.event === 'delete-zone' && message.data && message.data.elementId) {
+            this.deleteElement(message.data.elementId);
+            sendResponse({ success: true });
+            return true;
+          }
+        }
+        return false;
+      });
+    },
+    
+    // Handle mouse movement for highlighting
+    handleMouseMove(event) {
+      if (!this.selectionMode) return;
+      
+      // Skip if it's one of our own UI elements
+      if (event.target.closest('#browser-connect-selection-indicator') || 
+          event.target.closest('.browser-connect-element-highlight') ||
+          event.target.closest('.browser-connect-modal')) {
+        return;
+      }
+      
+      // Highlight the element under the cursor
+      this.highlightElement(event.target);
+    },
+    
+    // Handle click on an element
+    handleClick(event) {
+      if (!this.selectionMode) return;
+      
+      // Skip if it's one of our own UI elements
+      if (event.target.closest('#browser-connect-selection-indicator') || 
+          event.target.closest('.browser-connect-element-highlight') ||
+          event.target.closest('.browser-connect-modal')) {
+        return;
+      }
+      
+      // Prevent the click from affecting the page
+      event.preventDefault();
+      event.stopPropagation();
+      
+      // Select the element
+      this.selectElement(event.target);
+    },
+    
+    // Highlight an element temporarily (during mouse hover)
+    highlightElement(element) {
+      // Clear previous highlight
+      this.clearTempHighlight();
+      
+      // Create highlight
+      this.highlightedElement = element;
+      
+      const rect = element.getBoundingClientRect();
+      const highlight = document.createElement('div');
+      highlight.className = 'browser-connect-temp-highlight';
+      highlight.style.position = 'fixed';
+      highlight.style.top = `${rect.top}px`;
+      highlight.style.left = `${rect.left}px`;
+      highlight.style.width = `${rect.width}px`;
+      highlight.style.height = `${rect.height}px`;
+      highlight.style.border = '2px solid #00a8ff';
+      highlight.style.backgroundColor = 'rgba(0, 168, 255, 0.1)';
+      highlight.style.zIndex = '999998';
+      highlight.style.pointerEvents = 'none';
+      
+      document.body.appendChild(highlight);
+    },
+    
+    // Clear temporary highlight
+    clearTempHighlight() {
+      const highlights = document.querySelectorAll('.browser-connect-temp-highlight');
+      highlights.forEach(el => el.remove());
+      this.highlightedElement = null;
+    },
+    
+    // Select an element and ask for a label
+    selectElement(element) {
+      // Check if this element is already selected to prevent duplicates
+      let alreadySelected = false;
+      const alreadySelectedId = this.getElementIdIfSelected(element);
+      
+      if (alreadySelectedId) {
+        console.log('Element is already selected with ID:', alreadySelectedId);
+        // Flash the highlight to indicate it's already selected
+        const highlight = document.querySelector(`.browser-connect-element-highlight[data-element-id="${alreadySelectedId}"]`);
+        if (highlight) {
+          const originalBorder = highlight.style.border;
+          highlight.style.border = '3px solid #FFC107'; // Yellow flash
+          setTimeout(() => {
+            highlight.style.border = originalBorder;
+          }, 1000);
+        }
+        return; // Don't allow reselection
+      }
+      
+      // Extract initial text suggestion, limited to 20 chars
+      const textSuggestion = element.innerText ? 
+        element.innerText.substring(0, 20).replace(/\s+/g, ' ').trim() : 
+        element.tagName.toLowerCase();
+      
+      // Show a simple prompt for the label
+      const label = prompt('Enter a label for this element:', textSuggestion);
+      
+      if (label === null) {
+        // User cancelled
+        return;
+      }
+      
+      // Normalize label by removing excess whitespace including newlines
+      const normalizedLabel = label.trim().replace(/\s+/g, ' ');
+      
+      console.log('Normalized label from', JSON.stringify(label), 'to', JSON.stringify(normalizedLabel));
+      
+      // Create a unique ID for the element
+      const elementId = `browser-connect-element-${this.nextElementId++}`;
+      
+      // Extract element information
+      const elementData = {
+        elementId,
+        element,
+        label: normalizedLabel, // Use normalized label
+        xpath: getXPath(element),
+        cssSelector: getCssSelector(element),
+        innerText: element.innerText ? element.innerText.substring(0, 100).replace(/\s+/g, ' ').trim() : '',
+        tagName: element.tagName.toLowerCase(),
+        html: element.outerHTML, // Add HTML content
+        timestamp: Date.now()
+      };
+      
+      // Create zone data (used for socket events)
+      const zoneData = {
+        elementId,
+        label: normalizedLabel, // Use normalized label
+        url: window.location.href,
+        xpath: elementData.xpath,
+        cssSelector: elementData.cssSelector,
+        innerText: elementData.innerText,
+        tagName: elementData.tagName,
+        html: elementData.html, // Add the HTML content
+        timestamp: elementData.timestamp
+      };
+      
+      // Add to selected elements map
+      this.selectedElements.set(elementId, elementData);
+      
+      // Highlight the element permanently
+      this.addPermanentHighlight(element, label, elementId);
+      
+      // Notify extension that an element was selected AND send the zone data
+      // Combined approach to avoid duplicates
+      chrome.runtime.sendMessage({
+        type: 'element-selected',
+        data: zoneData,
+        forSocket: true // Flag to indicate this should be sent to socket as well
+      });
+      
+      console.log('Element selected:', elementData);
+    },
+    
+    // Helper method to check if an element is already selected
+    getElementIdIfSelected(element) {
+      let foundId = null;
+      
+      // Check if the element has a browserConnectId data attribute
+      if (element.dataset && element.dataset.browserConnectId) {
+        return element.dataset.browserConnectId;
+      }
+      
+      // Check if any of our stored elements match this one
+      this.selectedElements.forEach((data, id) => {
+        if (data.element === element) {
+          foundId = id;
+        }
+      });
+      
+      return foundId;
+    },
+    
+    // Add permanent highlight to a selected element
+    addPermanentHighlight(element, label, elementId) {
+      // Add a data attribute to the element to mark it as selected
+      // This helps prevent the same element from being selected multiple times
+      try {
+        element.dataset.browserConnectId = elementId;
+      } catch (e) {
+        console.log('Could not add dataset to element, will rely on object reference:', e);
+      }
+      
+      const rect = element.getBoundingClientRect();
+      
+      // Create highlight container
+      const highlight = document.createElement('div');
+      highlight.className = 'browser-connect-element-highlight';
+      highlight.setAttribute('data-element-id', elementId);
+      highlight.style.position = 'absolute';
+      highlight.style.top = `${window.scrollY + rect.top}px`;
+      highlight.style.left = `${window.scrollX + rect.left}px`;
+      highlight.style.width = `${rect.width}px`;
+      highlight.style.height = `${rect.height}px`;
+      highlight.style.border = '2px solid #4CAF50';
+      highlight.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
+      highlight.style.zIndex = '999997';
+      highlight.style.pointerEvents = 'none';
+      
+      // Add label
+      const labelElement = document.createElement('div');
+      labelElement.className = 'browser-connect-element-label';
+      labelElement.textContent = label;
+      labelElement.style.position = 'absolute';
+      labelElement.style.top = '-20px';
+      labelElement.style.left = '0';
+      labelElement.style.backgroundColor = '#4CAF50';
+      labelElement.style.color = 'white';
+      labelElement.style.padding = '2px 5px';
+      labelElement.style.borderRadius = '3px';
+      labelElement.style.fontSize = '12px';
+      labelElement.style.pointerEvents = 'none';
+      
+      // Add delete button
+      const deleteButton = document.createElement('div');
+      deleteButton.className = 'browser-connect-element-delete';
+      deleteButton.textContent = '✖';
+      deleteButton.style.position = 'absolute';
+      deleteButton.style.top = '-20px';
+      deleteButton.style.right = '0';
+      deleteButton.style.backgroundColor = '#F44336';
+      deleteButton.style.color = 'white';
+      deleteButton.style.padding = '2px 5px';
+      deleteButton.style.borderRadius = '3px';
+      deleteButton.style.fontSize = '12px';
+      deleteButton.style.cursor = 'pointer';
+      deleteButton.style.pointerEvents = 'auto';
+      
+      // Add click event to delete button
+      deleteButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.deleteElement(elementId);
+      });
+      
+      highlight.appendChild(labelElement);
+      highlight.appendChild(deleteButton);
+      document.body.appendChild(highlight);
+    },
+    
+    // Delete a specific element by ID
+    deleteElement(elementId) {
+      // Check if element exists
+      if (!this.selectedElements.has(elementId)) {
+        console.error('Element not found:', elementId);
+        return;
+      }
+      
+      // Remove highlight
+      const highlight = document.querySelector(`.browser-connect-element-highlight[data-element-id="${elementId}"]`);
+      if (highlight) {
+        highlight.remove();
+      }
+      
+      // Remove from selected elements map
+      this.selectedElements.delete(elementId);
+      
+      // Emit socket event for deletion
+      chrome.runtime.sendMessage({
+        type: 'socket-emit',
+        event: 'zones-deleted',
+        data: {
+          reason: 'user-deleted-single',
+          elementIds: [elementId],
+          url: window.location.href,
+          timestamp: Date.now()
+        }
+      }, (response) => {
+        if (response && response.success) {
+          console.log('Sent zones-deleted socket event for element:', elementId);
+        } else {
+          console.error('Failed to send zones-deleted socket event');
+        }
+      });
+      
+      // Notify extension that elements were updated
+      chrome.runtime.sendMessage({
+        type: 'element-deleted',
+        elementId: elementId
+      });
+      
+      console.log('Element deleted:', elementId);
+    },
+    
+    toggleSelectionMode() {
+      console.log('🔍 DEBUG: ElementSelector - toggleSelectionMode called, current mode:', this.selectionMode);
+      this.selectionMode = !this.selectionMode;
+      document.body.style.cursor = this.selectionMode ? 'crosshair' : '';
+      console.log('🔍 DEBUG: Selection mode toggled to:', this.selectionMode);
+      
+      // Show debug indicator with selection mode status
+      try {
+        const indicator = document.createElement('div');
+        indicator.style.position = 'fixed';
+        indicator.style.bottom = '10px';
+        indicator.style.right = '10px';
+        indicator.style.backgroundColor = this.selectionMode ? 'rgba(0, 200, 0, 0.9)' : 'rgba(200, 0, 0, 0.9)';
+        indicator.style.color = 'white';
+        indicator.style.padding = '8px 12px';
+        indicator.style.borderRadius = '4px';
+        indicator.style.zIndex = '2147483647'; // Maximum z-index
+        indicator.style.fontSize = '14px';
+        indicator.style.fontWeight = 'bold';
+        indicator.style.fontFamily = 'Arial, sans-serif';
+        indicator.style.boxShadow = '0 2px 5px rgba(0,0,0,0.3)';
+        indicator.textContent = `Selection Mode: ${this.selectionMode ? 'ON' : 'OFF'}`;
+        document.body.appendChild(indicator);
+        
+        // Remove after 3 seconds
+        setTimeout(() => {
+          if (indicator.parentNode) {
+            indicator.parentNode.removeChild(indicator);
+          }
+        }, 3000);
+      } catch (error) {
+        console.error('🚨 ERROR: Failed to show selection mode indicator', error);
+      }
+      
+      if (this.selectionMode) {
+        this.createSelectionIndicator();
+        this.setupEventListeners();
+        console.log('🔍 DEBUG: Selection mode activated - indicator created and events set up');
+      } else {
+        this.removeSelectionIndicator();
+        this.clearTempHighlight();
+        this.removeEventListeners();
+        console.log('🔍 DEBUG: Selection mode deactivated - indicator removed and events cleaned up');
+      }
+      
+      return this.selectionMode;
+    },
+    
+    createSelectionIndicator() {
+      try {
+        console.log('🔍 DEBUG: Creating selection indicator');
+        
+        // Remove existing indicator if any
+        this.removeSelectionIndicator();
+        
+        if (!document || !document.body) {
+          console.error('🚨 ERROR: document.body not available for selection indicator');
+          return false;
+        }
+        
+        const indicator = document.createElement('div');
+        indicator.id = 'browser-connect-selection-indicator';
+        indicator.textContent = 'Selection Mode: ON';
+        indicator.style.cssText = `
+          position: fixed;
+          top: 10px;
+          right: 10px;
+          background-color: rgba(76, 175, 80, 0.9);
+          color: white;
+          padding: 8px 12px;
+          border-radius: 4px;
+          font-family: Arial, sans-serif;
+          font-size: 14px;
+          z-index: 2147483647;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        `;
+        
+        return safeAppendToBody(indicator);
+      } catch (error) {
+        console.error('🚨 ERROR: Failed to create selection indicator:', error);
+        return false;
+      }
+    },
+    
+    removeSelectionIndicator() {
+      const indicator = document.getElementById('browser-connect-selection-indicator');
+      if (indicator) {
+        indicator.remove();
+      }
+    },
+    
+    getSelectedElementsData() {
+      // Convert map to array for response
+      const elements = [];
+      this.selectedElements.forEach((data, id) => {
+        elements.push({
+          elementId: id,
+          label: data.label,
+          xpath: data.xpath || '',
+          cssSelector: data.cssSelector || '',
+          innerText: data.element ? (data.element.innerText || '').substring(0, 100) : ''
+        });
+      });
+      return elements;
+    },
+    
+    highlightAllSelectedElements() {
+      // Re-highlight all selected elements
+      this.selectedElements.forEach((data, elementId) => {
+        if (data.element && document.body.contains(data.element)) {
+          this.addPermanentHighlight(data.element, data.label, elementId);
+        }
+      });
+      
+      return { success: true };
+    },
+    
+    hideAllSelectedElements() {
+      // Remove all highlight elements
+      const highlights = document.querySelectorAll('.browser-connect-element-highlight');
+      highlights.forEach(el => el.remove());
+      
+      return { success: true };
+    },
+    
+    clearAllSelectedElements(reason) {
+      // Clear all selected elements
+      this.selectedElements.clear();
+      console.log('All elements cleared:', reason);
+      
+      // Remove all highlights
+      this.hideAllSelectedElements();
+      
+      // Notify that elements were cleared
+      chrome.runtime.sendMessage({
+        type: 'elements-cleared',
+        reason: reason
+      });
+      
+      return { success: true };
+    },
+    
+    // Create visual indicator for debugging purposes
+    createDebugIndicator() {
+      try {
+        // Remove any existing debug indicator
+        this.removeDebugIndicator();
+        
+        // Create indicator
+        const indicator = document.createElement('div');
+        indicator.id = 'browser-connect-debug-indicator';
+        indicator.style.position = 'fixed';
+        indicator.style.bottom = '10px';
+        indicator.style.left = '10px';
+        indicator.style.backgroundColor = 'rgba(0, 255, 0, 0.8)';
+        indicator.style.color = 'white';
+        indicator.style.padding = '5px 10px';
+        indicator.style.borderRadius = '4px';
+        indicator.style.zIndex = '2147483647'; // Maximum z-index
+        indicator.style.fontSize = '12px';
+        indicator.style.fontFamily = 'monospace';
+        indicator.textContent = 'Browser Connect: Script Loaded';
+        document.body.appendChild(indicator);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+          this.removeDebugIndicator();
+        }, 5000);
+        
+        console.log('🔍 DEBUG: Created visual debug indicator');
+      } catch (error) {
+        console.error('🚨 ERROR: Failed to create debug indicator', error);
+      }
+    },
+    
+    // Remove debug indicator
+    removeDebugIndicator() {
+      try {
+        const indicator = document.getElementById('browser-connect-debug-indicator');
+        if (indicator) {
+          indicator.remove();
+        }
+      } catch (error) {
+        console.error('🚨 ERROR: Failed to remove debug indicator', error);
+      }
+    },
+    
+    clearElementHighlights() {
+      // Remove all highlights but keep the selections in memory
+      this.hideAllSelectedElements();
+      return { success: true };
+    }
+  };
   
-  // Add timestamp
-  const timestampSpan = document.createElement('span');
-  timestampSpan.className = 'browser-connect-console-timestamp';
-  timestampSpan.textContent = timestamp;
-  
-  // Add message
-  const messageText = document.createTextNode(logData.message);
-  
-  // Combine elements
-  logEntry.appendChild(timestampSpan);
-  logEntry.appendChild(messageText);
-  
-  // Add to console
-  consoleElement.appendChild(logEntry);
-  
-  // Auto-scroll to bottom
-  consoleElement.scrollTop = consoleElement.scrollHeight;
-  
-  // Also log to browser console
-  if (logData.level === 'error') {
-    console.error(`[Browser Connect] ${logData.message}`);
-  } else {
-    console.log(`[Browser Connect] ${logData.message}`);
+  // Continue with initialization
+  try {
+    elementSelector.setupEventListeners();
+    elementSelector.setupSocketMessageHandler();
+    window.browserConnectAPI.isReady = true;
+    
+    // Create a debug indicator to show that the script is loaded
+    elementSelector.createDebugIndicator();
+    
+    console.log('🔍 DEBUG: ElementSelector successfully initialized');
+    sendInitialReadyMessage();
+  } catch (error) {
+    console.error('🚨 ERROR: Failed to initialize ElementSelector:', error);
   }
 }
 
-// For debugging: test if content script is properly loaded
-console.log('Browser Connect: Content script loaded and ready');
+// Send a message to the background script that we're ready
+function sendInitialReadyMessage() {
+  console.log('🔍 DEBUG: Sending initial content-script-ready message');
+  try {
+    chrome.runtime.sendMessage(
+      { type: 'content-script-ready' },
+      function(response) {
+        console.log('🔍 DEBUG: Sent initial content-script-ready message, response:', response);
+      }
+    );
+  } catch (error) {
+    console.error('🚨 ERROR: Failed to send ready message:', error);
+  }
+}
 
-// Initialize
-injectStyles();
+// Verify that our script has access to the document
+function verifyScriptContext() {
+  console.log('🔍 DEBUG: Verifying script context');
+  if (typeof document === 'undefined') {
+    console.error('🚨 ERROR: No access to document');
+    return false;
+  }
+  
+  console.log('🔍 DEBUG: URL:', window.location.href);
+  console.log('🔍 DEBUG: Running in context with access to DOM:', !!document.body);
+  return true;
+}
 
-// Add event listeners
-document.addEventListener('mousemove', handleMouseMove);
-document.addEventListener('click', handleClick, true); // Use capture phase 
+// Main initialization function that runs when content script loads
+(function initialize() {
+  // Check for script context, but don't fail if we don't have full DOM access yet
+  if (!verifyScriptContext()) {
+    console.error('🚨 ERROR: Script context verification failed, aborting initialization');
+    
+    // Still set up message handler to be able to respond about our status
+    initializeMessageHandler();
+    return;
+  }
+  
+  // Always set up the message handler first, regardless of DOM state
+  initializeMessageHandler();
+  
+  // Wait for DOM to be fully loaded before creating any UI elements
+  waitForDOM(function() {
+    console.log('🔍 DEBUG: DOM is ready, initializing element selector');
+    injectElementSelector();
+  });
+  
+  // Send initial content-script-ready message, response: { success: true, received: true }
+  console.log('🔍 DEBUG: Sent initial content-script-ready message');
+})(); 

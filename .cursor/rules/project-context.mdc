@@ -7,6 +7,12 @@ alwaysApply: true
 
 This document provides context about the MCP Browser Connect project for LLM assistance.
 
+## tools
+1. browser_get_title - Get the title of the currently selected tab. 
+2. browser_get_zones - Get all the zones selected. 
+3. browser_get_zone_details -  Get the details from any one zone. 
+
+
 ## Project Overview
 
 MCP Browser Connect is a system that allows LLMs to interact with browser tabs through a Chrome extension. The project consists of two main components:
@@ -40,11 +46,68 @@ MCP Browser Connect is a system that allows LLMs to interact with browser tabs t
 
 ## Code Structure
 
+### HTTP Server
+
 - `http-server/`: Contains the MCP and HTTP server implementation
   - `src/tools/tabs.js`: Implements the tab title tool and socket handlers
   - `src/index.ts`: Main server setup and initialization
+
+### Extension
+
 - `extension/`: Contains the Chrome extension implementation
-  - `window.js`: Handles the extension UI and Socket.IO communication
+  - `window.html`: The main window UI for the extension
+  - `window.js`: Initializes and connects modules for the extension UI
+  - `content-script.js`: Injected into web pages for DOM interaction
+  - `popup.js`: Handles the extension popup UI
+  - `popup.html`: The extension popup UI
+  - `manifest.json`: Chrome extension configuration
+  - `background.js`: Background service worker for the extension
+
+#### Modular Architecture
+
+The extension implements a modular architecture with the following components:
+
+- `extension/js/modules/`: Contains modular components of the extension
+  - `SocketConnectionManager.js`: Manages Socket.IO connections
+    - Handles connecting/disconnecting from the server
+    - Manages socket events and message routing
+    - Provides Promise-based API for socket operations
+  - `TabManager.js`: Manages browser tabs
+    - Handles tab selection, navigation, and updates
+    - Keeps track of active and previously selected tabs
+    - Provides methods for querying and manipulating tabs
+  - `UIUpdater.js`: Manages UI updates
+    - Updates tab lists and displays
+    - Manages status messages and UI state
+    - Handles logging and error display
+  - `ElementSelectionManager.js`: Manages element selection
+    - Controls element selection mode
+    - Handles highlighting and clearing elements
+    - Manages selected elements list
+  - `index.js`: Exports all modules for easy importing
+
+## Module Interaction Flow
+
+```
+                      ┌─────────────────┐
+                      │    window.js    │
+                      │  (Entry Point)  │
+                      └────────┬────────┘
+                               │
+               ┌───────────────┼───────────────┐
+               │               │               │
+    ┌──────────▼─────┐ ┌───────▼────────┐ ┌────▼─────────────┐
+    │ TabManager.js  │ │ UIUpdater.js   │ │ SocketConnection │
+    │                │ │                │ │    Manager.js    │
+    └──────────┬─────┘ └───────┬────────┘ └────┬─────────────┘
+               │               │               │
+               └───────────────▼───────────────┘
+                               │
+                     ┌─────────▼──────────┐
+                     │ ElementSelection   │
+                     │    Manager.js      │
+                     └────────────────────┘
+```
 
 ## Current Limitations and Future Plans
 
@@ -60,5 +123,15 @@ MCP Browser Connect is a system that allows LLMs to interact with browser tabs t
 ## Development Approach
 
 We're building this iteratively, starting with the core tab title functionality and expanding with additional tools as needed. The codebase is structured with this expansion in mind, using a modular approach that separates concerns and allows for easy addition of new features.
+
+## Adding New Features
+
+When adding new features to the extension:
+
+- Socket-related functionality should be added to SocketConnectionManager.js
+- Tab management functionality should be added to TabManager.js
+- UI updates and rendering should be added to UIUpdater.js
+- Element selection and DOM interaction should be added to ElementSelectionManager.js
+- Non-specific utility functions should be considered for shared utility modules (upcoming)
 
 This context will help LLMs understand the project's purpose, architecture, implementation, and future direction when providing assistance with the MCP Browser Connect codebase.

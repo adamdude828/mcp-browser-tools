@@ -1,5 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { registerTabTitleTool, setupTabSocketHandlers } from "./tabs.js";
+import { 
+  registerTabTitleTool, 
+  registerBrowserZonesTool, 
+  registerBrowserZoneDetailsTool, 
+  setupTabSocketHandlers 
+} from "./tabs.js";
 
 /**
  * Registers all MCP tools with the server
@@ -8,10 +13,16 @@ import { registerTabTitleTool, setupTabSocketHandlers } from "./tabs.js";
 export function registerAllTools(server: McpServer): void {
   // Register the tab title tool
   registerTabTitleTool(server);
+  
+  // Register the browser zones tools
+  registerBrowserZonesTool(server);
+  registerBrowserZoneDetailsTool(server);
 }
 
 // Export individual tool registration functions
 export { 
   registerTabTitleTool,
+  registerBrowserZonesTool,
+  registerBrowserZoneDetailsTool,
   setupTabSocketHandlers 
 }; 

@@ -110,10 +110,50 @@
       color: #666;
     }
     
+    .selected-elements-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      margin-bottom: 8px;
+    }
+    
+    .secondary-btn {
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      background-color: #f0f0f0;
+      color: #333;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    
+    .secondary-btn:hover {
+      background-color: #e0e0e0;
+    }
+    
+    .secondary-btn.danger {
+      background-color: #ffebee;
+      border-color: #ffcdd2;
+      color: #c62828;
+    }
+    
+    .secondary-btn.danger:hover {
+      background-color: #ffcdd2;
+    }
+    
     .selected-elements {
       margin-top: 16px;
       max-height: 200px;
       overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      padding: 8px;
+    }
+    
+    .element-list-header {
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e0e0e0;
     }
     
     .element-item {
@@ -192,6 +232,11 @@
       Keyboard shortcut: <code>Alt+S</code>
     </div>
     
+    <div class="selected-elements-actions">
+      <button id="highlightAllBtn" class="secondary-btn">Highlight All</button>
+      <button id="clearSelectionsBtn" class="secondary-btn danger">Clear All</button>
+    </div>
+    
     <div class="selected-elements" id="selectedElements">
       <!-- Selected elements will be listed here -->
     </div>
@@ -200,7 +245,7 @@
   <button id="debugToggle">Show Debug Info</button>
   <div id="debugInfo"></div>
   
-  <!-- Load the popup script -->
-  <script src="popup.js"></script>
+  <!-- Load the popup script - use type="module" for ES modules support -->
+  <script src="popup.js" type="module"></script>
 </body>
 </html> 

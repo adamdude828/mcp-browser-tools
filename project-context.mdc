@@ -1,6 +1,115 @@
----
-description: 
-globs: 
-alwaysApply: false
----
- 
+# MCP Browser Connect Project
+
+This document provides context about the MCP Browser Connect project for LLM assistance.
+
+## Project Overview
+
+MCP Browser Connect is a system that allows LLMs to interact with browser tabs through a Chrome extension. The project consists of two main components:
+
+1. **MCP Server**: A TypeScript server implementing the Model Context Protocol (MCP) with browser integration tools.
+2. **Chrome Extension**: A browser extension that communicates with the MCP server via Socket.IO.
+
+## Key Features
+
+- **Browser Tab Tools**: Provides tools for retrieving and managing browser tab information
+  - **Tab Title Tool**: Retrieves the title and URL of the active browser tab in real-time
+  - **Zone Tools**: Allows selecting, querying, and managing zones (selected elements) on web pages
+- **Real-time Communication**: Uses Socket.IO for bidirectional communication between the server and extension
+- **MCP Integration**: Implements the Model Context Protocol for standardized LLM tool interactions
+- **Expandable Architecture**: Designed for future expansion with additional browser interaction tools
+
+## Architecture
+
+```
+┌─────────────┐    Socket.IO    ┌─────────────┐    MCP     ┌─────────────┐
+│   Chrome    │◄──────────────►│  HTTP/MCP   │◄──────────►│    LLM      │
+│  Extension  │                │   Server    │            │  (Claude)    │
+└─────────────┘                └─────────────┘            └─────────────┘
+```
+
+## Technical Implementation
+
+- The HTTP server provides Socket.IO endpoints and MCP protocol support
+- The extension connects to the server and responds to requests for tab and element information
+- Available MCP tools:
+  - `browser_get_title`: Retrieves the active tab's title and URL
+  - `browser_get_zones`: Gets a list of all selected zones (elements) from the browser
+  - `browser_get_zone_details`: Gets detailed information about a specific zone by its label
+- Socket handlers properly route messages between the extension and MCP server
+- The codebase is organized to easily add more browser interaction tools in the future
+
+## Code Structure
+
+- `http-server/`: Contains the MCP and HTTP server implementation
+  - `src/tools/tabs.js`: Implements the tab title tool and socket handlers
+  - `src/index.ts`: Main server setup and initialization
+- `extension/`: Contains the Chrome extension implementation
+  - `js/modules/`: Contains modular components of the extension
+    - `ElementHighlighter.js`: Handles visual highlighting of elements on the page
+    - `ElementSelector.js`: Core module for selecting and managing elements
+    - `DOMUtils.js`: DOM manipulation and query utilities
+    - `UIManager.js`: Handles UI components like modals and notifications
+    - `TabManager.js`: Manages browser tab operations
+    - `SocketConnectionManager.js`: Handles socket.io communication
+    - `UIUpdater.js`: Manages UI state and updates
+    - `index.js`: Exports all modules for easy importing
+  - `content-script.js`: Content script injected into web pages (now modular)
+  - `background.js`: Background script for extension
+  - `window.js`: Handles the extension UI (now modular)
+  - `popup.js`: Handles the extension popup UI (to be modularized)
+
+## Extension Module Structure
+
+### Content Script Modules
+
+The content script has been modularized into these components:
+
+1. **ElementHighlighter**: Manages the visual highlighting of elements on the page
+   - Injects CSS styles
+   - Handles temporary highlighting during hover
+   - Manages permanent highlighting of selected elements 
+   - Displays selection mode indicators and notifications
+
+2. **ElementSelector**: Core module that manages element selection
+   - Tracks selection mode state
+   - Stores selected elements
+   - Processes user interactions (click, mouseover)
+   - Responds to messages from background script
+   - Delegates to other modules
+
+3. **UIManager**: Handles UI components like modals and notifications
+   - Creates and manages modals for element labeling
+   - Manages console output
+   - Provides UI utilities
+
+4. **DOMUtils**: DOM interaction utilities
+   - Gets XPath expressions for elements
+   - Gets CSS selectors for elements
+   - Provides element information extraction
+   - Utility functions for DOM manipulation
+
+### Window UI Modules
+
+The window.js has already been modularized into:
+
+1. **SocketConnectionManager**: Handles Socket.IO connections
+2. **TabManager**: Tab information and management
+3. **UIUpdater**: UI update handling
+4. **ElementSelectionManager**: Element selection in window UI
+
+## Current Limitations and Future Plans
+
+- The system currently focuses on getting the title and URL of the active tab
+- No caching is performed at the HTTP server layer; data is always fetched directly from the extension
+- The extension must be connected to the server for the tools to work
+- **Future Expansion**: The project will be extended with additional browser interaction tools such as:
+  - Page navigation and tab management
+  - Content extraction and manipulation
+  - Browser automation features
+  - Screenshot and visual inspection capabilities
+
+## Development Approach
+
+We're building this iteratively, starting with the core tab title functionality and expanding with additional tools as needed. The codebase is structured with this expansion in mind, using a modular approach that separates concerns and allows for easy addition of new features.
+
+This context will help LLMs understand the project's purpose, architecture, implementation, and future direction when providing assistance with the MCP Browser Connect codebase. 

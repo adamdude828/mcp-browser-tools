@@ -1,47 +1,44 @@
 {
   "manifest_version": 3,
   "name": "Browser Connect",
-  "version": "0.1.0",
-  "description": "Connect browser to AI agents by sharing tab information",
+  "version": "1.0.0",
+  "description": "Connect your browser to MCP server",
+  "action": {
+    "default_title": "Browser Connect"
+  },
   "permissions": [
     "tabs",
     "activeTab",
-    "storage",
-    "webRequest",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
-    "http://localhost:*/*",
-    "https://*/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
   },
-  "action": {},
-  "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src * 'self' http://* https://* ws://* wss://*"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["socket.io.min.js", "window.html"],
-      "matches": ["<all_urls>"]
-    }
-  ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["content-script.js"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content-script.js", "minimal-selector.js"],
+      "matches": ["<all_urls>"]
     }
   ],
   "commands": {
     "toggle-selection-mode": {
       "suggested_key": {
-        "default": "Alt+S",
-        "mac": "Alt+S"
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
       },
       "description": "Toggle element selection mode"
     }
-  },
-  "minimum_chrome_version": "116"
+  }
 } 
