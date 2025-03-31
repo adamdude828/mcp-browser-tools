@@ -319,6 +319,78 @@
       font-family: monospace;
       word-break: break-all;
     }
+    
+    /* Add these styles for selected elements and screenshot features */
+    .selected-element-item {
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      border: 1px solid #e0e0e0;
+      background-color: #f9f9f9;
+      position: relative;
+      cursor: context-menu;
+      display: flex;
+      align-items: center;
+    }
+    
+    .selected-element-item:hover {
+      background-color: #f0f0f0;
+      border-color: #2196f3;
+    }
+    
+    .selected-element-item .element-label {
+      font-weight: bold;
+      margin-right: 10px;
+    }
+    
+    .selected-element-item .element-tag-info {
+      font-size: 12px;
+      color: #757575;
+      margin-right: auto;
+    }
+    
+    .selected-element-item .element-delete-button {
+      background-color: #f44336;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      line-height: 1;
+    }
+    
+    .selected-element-item.screenshot-processing {
+      background-color: #e3f2fd;
+      border-color: #2196f3;
+      opacity: 0.7;
+    }
+    
+    .loading-indicator {
+      font-style: italic;
+      color: #757575;
+      margin-left: 8px;
+    }
+    
+    .screenshot-help-text {
+      font-size: 12px;
+      color: #757575;
+      font-style: italic;
+      margin-top: 10px;
+      text-align: center;
+    }
+    
+    .no-elements-message {
+      padding: 20px;
+      text-align: center;
+      color: #757575;
+      font-style: italic;
+    }
   </style>
 </head>
 <body>

@@ -4,6 +4,13 @@
 
 console.log('🔍 BROWSER CONNECT CONTENT SCRIPT LOADED', new Date().toISOString());
 
+// Check for html2canvas
+if (typeof html2canvas === 'undefined') {
+  console.error('🚨 ERROR: html2canvas not loaded! Screenshots will not work!');
+} else {
+  console.log('🔍 DEBUG: html2canvas loaded successfully', typeof html2canvas);
+}
+
 // Global variable to track DOM readiness
 let domIsReady = false;
 let initializationAttempted = false;
@@ -39,6 +46,50 @@ window.browserConnectAPI = {
   clearElements: function(reason) {
     if (!elementSelector) return { success: false };
     return { success: elementSelector.clearAllSelectedElements(reason || 'api-call') };
+  },
+  // Add screenshot capability to the browserConnectAPI
+  captureElementScreenshot: function(elementId) {
+    console.log('🔍 DEBUG: Window API captureElementScreenshot called for', elementId);
+    if (!elementSelector) return { success: false, error: 'ElementSelector not initialized' };
+    
+    if (typeof html2canvas === 'undefined') {
+      console.error('🚨 ERROR: html2canvas not available for screenshot');
+      return { success: false, error: 'html2canvas not available' };
+    }
+    
+    try {
+      const element = document.querySelector(`[data-extension-element-id="${elementId}"]`);
+      if (!element) {
+        console.error('Element not found for screenshot:', elementId);
+        return { success: false, error: 'Element not found' };
+      }
+      
+      // Return a promise that will resolve with the screenshot data
+      return new Promise((resolve, reject) => {
+        html2canvas(element, {
+          allowTaint: true,
+          useCORS: true,
+          logging: false,
+          scale: window.devicePixelRatio
+        }).then(canvas => {
+          // Convert canvas to base64 image data
+          const imageData = canvas.toDataURL('image/png');
+          
+          resolve({ 
+            success: true, 
+            imageData: imageData,
+            width: canvas.width,
+            height: canvas.height
+          });
+        }).catch(error => {
+          console.error('Error capturing screenshot:', error);
+          reject({ success: false, error: error.message });
+        });
+      });
+    } catch (error) {
+      console.error('Error in screenshot capture:', error);
+      return { success: false, error: error.message };
+    }
   }
 };
 
@@ -160,6 +211,61 @@ function initializeMessageHandler() {
       elementSelector.deleteElement(message.elementId);
       sendResponse({ success: true });
       return true;
+    }
+    
+    // Check if the message is meant to capture a screenshot
+    if (message.type === 'capture-element-screenshot') {
+      console.log('🔍 DEBUG: Received capture-element-screenshot message for element:', message.elementId);
+      try {
+        const element = document.querySelector(`[data-extension-element-id="${message.elementId}"]`);
+        if (!element) {
+          console.error('Element not found for screenshot:', message.elementId);
+          sendResponse({ success: false, error: 'Element not found' });
+          return true;
+        }
+        
+        console.log('🔍 DEBUG: Found element for screenshot, dimensions:', element.offsetWidth, 'x', element.offsetHeight);
+        
+        // Use html2canvas to capture the element
+        console.log('🔍 DEBUG: Starting html2canvas capture...');
+        
+        // Check if html2canvas is available
+        if (typeof html2canvas !== 'function') {
+          console.error('🚨 ERROR: html2canvas is not available as a function:', typeof html2canvas);
+          sendResponse({ success: false, error: 'html2canvas not available' });
+          return true;
+        }
+        
+        html2canvas(element, {
+          allowTaint: true,
+          useCORS: true,
+          logging: true, // Enable logging for debugging
+          scale: window.devicePixelRatio
+        }).then(canvas => {
+          // Convert canvas to base64 image data
+          console.log('🔍 DEBUG: html2canvas capture successful, canvas size:', canvas.width, 'x', canvas.height);
+          const imageData = canvas.toDataURL('image/png');
+          console.log('🔍 DEBUG: Converted to image data, length:', imageData.length);
+          
+          // Send back the image data
+          sendResponse({ 
+            success: true, 
+            imageData: imageData,
+            width: canvas.width,
+            height: canvas.height
+          });
+        }).catch(error => {
+          console.error('Error capturing screenshot:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+        
+        // Return true to indicate we'll call sendResponse asynchronously
+        return true;
+      } catch (error) {
+        console.error('Error in screenshot capture:', error);
+        sendResponse({ success: false, error: error.message });
+        return true;
+      }
     }
     
     return true;

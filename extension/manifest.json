@@ -1,34 +1,40 @@
 {
   "manifest_version": 3,
   "name": "Browser Connect",
-  "version": "1.0.0",
-  "description": "Connect your browser to MCP server",
+  "version": "1.0",
+  "description": "Connect browser with LLMs via Socket.IO",
   "action": {
-    "default_title": "Browser Connect"
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "images/icon16.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
   },
   "permissions": [
-    "tabs",
     "activeTab",
-    "scripting",
-    "storage"
+    "tabs",
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content-script.js"],
+      "js": ["html2canvas.min.js", "content-script.js"],
       "run_at": "document_idle",
       "all_frames": false
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["content-script.js", "minimal-selector.js"],
+      "resources": ["window.html"],
       "matches": ["<all_urls>"]
     }
   ],

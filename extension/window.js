@@ -14,7 +14,7 @@ import {
 const uiUpdater = new UIUpdater();
 const tabManager = new TabManager();
 const socketManager = new SocketConnectionManager();
-const elementManager = new ElementSelectionManager(tabManager, uiUpdater);
+const elementSelectionManager = new ElementSelectionManager(tabManager, uiUpdater);
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
   tabManager.initialize(uiUpdater.log.bind(uiUpdater));
   
   // Initialize element selection manager
-  elementManager.initialize(uiUpdater.log.bind(uiUpdater));
+  elementSelectionManager.initialize(uiUpdater.log.bind(uiUpdater));
 
   // Check if Socket.IO is loaded
   if (typeof io === 'undefined') {
@@ -102,6 +102,9 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Refresh tabs periodically
   setInterval(loadTabs, 5000);
+
+  // Set up event listeners
+  setupEventListeners();
 });
 
 // Load and display all tabs
@@ -128,7 +131,10 @@ function selectTab(tab) {
     })
     .then(updatedTab => {
       // Reset selection mode state
-      elementManager.resetSelectionMode();
+      elementSelectionManager.resetSelectionMode();
+      
+      // Update the tab ID in UIUpdater
+      uiUpdater.setTabId(updatedTab.id);
       
       // Update the UI
       uiUpdater.updateActiveTabDisplay(updatedTab);
@@ -137,7 +143,7 @@ function selectTab(tab) {
       loadTabs();
       
       // Load selected elements for this tab
-      elementManager.loadSelectedElements();
+      elementSelectionManager.loadSelectedElements();
       
       // Send to server if connected
       if (socketManager.isConnected()) {
@@ -210,7 +216,7 @@ function connect() {
       socketManager.on('element-selected', (data) => {
         if (data && data.elementId) {
           uiUpdater.log('Element selected event from server:', data.label || data.elementId);
-          elementManager.loadSelectedElements(); // Refresh the elements list
+          elementSelectionManager.loadSelectedElements(); // Refresh the elements list
         }
       });
     })
@@ -227,7 +233,7 @@ function disconnect() {
 
 // Start or stop element selection mode
 function startElementSelection() {
-  elementManager.toggleSelectionMode()
+  elementSelectionManager.toggleSelectionMode()
     .catch(error => {
       uiUpdater.log('Error toggling selection mode', error.message);
     });
@@ -235,7 +241,7 @@ function startElementSelection() {
 
 // Toggle element highlighting
 function toggleElementHighlight() {
-  elementManager.toggleHighlightElements()
+  elementSelectionManager.toggleHighlightElements()
     .catch(error => {
       uiUpdater.log('Error toggling element highlight', error.message);
     });
@@ -243,8 +249,87 @@ function toggleElementHighlight() {
 
 // Clear all selected elements
 function clearAllElements() {
-  elementManager.clearAllElements()
+  elementSelectionManager.clearAllElements()
     .catch(error => {
       uiUpdater.log('Error clearing elements', error.message);
     });
-} 
+}
+
+// Handle element click for screenshots
+function handleZoneScreenshot(event) {
+  // Prevent default right-click behavior
+  event.preventDefault();
+  
+  // Get the element ID from the data attribute
+  const elementItem = event.target.closest('.selected-element-item');
+  if (!elementItem) {
+    console.error('No element item found for screenshot');
+    return;
+  }
+  
+  const elementId = elementItem.dataset.elementId;
+  const elementLabel = elementItem.querySelector('.element-label')?.textContent;
+  
+  if (!elementId) {
+    console.error('No element ID found for screenshot');
+    return;
+  }
+  
+  console.log(`Taking screenshot of element: ${elementLabel} (${elementId})`);
+  
+  // Disable the button while processing
+  elementItem.classList.add('screenshot-processing');
+  
+  // Show a loading indicator
+  const loadingSpan = document.createElement('span');
+  loadingSpan.className = 'loading-indicator';
+  loadingSpan.textContent = ' (Capturing...)';
+  elementItem.appendChild(loadingSpan);
+  
+  // Capture the screenshot using ElementSelectionManager
+  elementSelectionManager.captureElementScreenshot(elementId)
+    .then(result => {
+      console.log('Screenshot captured and uploaded:', result);
+      // Update UI to indicate success
+      if (loadingSpan) {
+        loadingSpan.textContent = ' (Captured ✓)';
+        setTimeout(() => {
+          loadingSpan.remove();
+        }, 2000);
+      }
+    })
+    .catch(error => {
+      console.error('Error capturing screenshot:', error);
+      // Update UI to indicate failure
+      if (loadingSpan) {
+        loadingSpan.textContent = ' (Failed ✗)';
+        setTimeout(() => {
+          loadingSpan.remove();
+        }, 2000);
+      }
+    })
+    .finally(() => {
+      // Re-enable the button
+      elementItem.classList.remove('screenshot-processing');
+    });
+}
+
+// Set up event listeners
+function setupEventListeners() {
+  // Add event listener for right-click on selected elements
+  document.addEventListener('contextmenu', function(event) {
+    const elementItem = event.target.closest('.selected-element-item');
+    if (elementItem) {
+      handleZoneScreenshot(event);
+    }
+  });
+}
+
+// Set server URL for ElementSelectionManager
+socketManager.onConnect((socket) => {
+  // ... existing code ...
+  
+  // Set the server URL for screenshot uploads (remove /socket.io)
+  const baseServerUrl = socketManager.serverUrl.replace(/\/socket\.io\/?$/, '');
+  elementSelectionManager.setServerUrl(baseServerUrl);
+}); 

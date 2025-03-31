@@ -5,6 +5,7 @@ import {
   registerBrowserZoneDetailsTool, 
   setupTabSocketHandlers 
 } from "./tabs.js";
+import { registerScreenshotTools } from "./screenshots.js";
 
 /**
  * Registers all MCP tools with the server
@@ -17,6 +18,9 @@ export function registerAllTools(server: McpServer): void {
   // Register the browser zones tools
   registerBrowserZonesTool(server);
   registerBrowserZoneDetailsTool(server);
+  
+  // Register screenshot tools
+  registerScreenshotTools(server);
 }
 
 // Export individual tool registration functions

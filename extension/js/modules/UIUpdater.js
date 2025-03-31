@@ -7,6 +7,7 @@ class UIUpdater {
   constructor() {
     this.logEntries = [];
     this.maxLogEntries = 50;
+    this.tabId = null;
   }
 
   /**
@@ -14,6 +15,14 @@ class UIUpdater {
    */
   initialize() {
     // Nothing to do here for now
+  }
+
+  /**
+   * Set the current tab ID
+   * @param {number} tabId - The tab ID
+   */
+  setTabId(tabId) {
+    this.tabId = tabId;
   }
 
   /**
@@ -192,80 +201,111 @@ class UIUpdater {
    * @param {Array} elements - Array of selected elements
    */
   displaySelectedElements(elements) {
-    const container = document.getElementById('selectedElementsList');
-    
-    if (!elements || elements.length === 0) {
-      container.innerHTML = '<p>No elements selected yet.</p>';
+    const selectedElementsList = document.getElementById('selectedElementsList');
+    if (!selectedElementsList) {
+      console.warn('⚠️ WARNING: Cannot find selected elements list element');
+      if (this.log) {
+        this.log('⚠️ WARNING: Cannot find selected elements list element');
+      }
       return;
     }
-    
-    // Sort elements by timestamp (newest first)
-    elements.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-    
-    // Create HTML
-    container.innerHTML = '';
-    
-    // Add count header
-    const header = document.createElement('div');
-    header.className = 'elements-header';
-    header.innerHTML = `<strong>${elements.length} element(s) selected</strong>`;
-    container.appendChild(header);
-    
-    // Add each element
-    elements.forEach((element, index) => {
+
+    // Clear the list
+    selectedElementsList.innerHTML = '';
+
+    if (!elements || elements.length === 0) {
+      // If no elements, show a placeholder message
+      const noElementsItem = document.createElement('div');
+      noElementsItem.className = 'no-elements-message';
+      noElementsItem.textContent = 'No elements selected. Click "Select Elements" to begin.';
+      selectedElementsList.appendChild(noElementsItem);
+      return;
+    }
+
+    // Add each element to the list
+    elements.forEach(element => {
       const elementItem = document.createElement('div');
-      elementItem.className = 'element-item';
+      elementItem.className = 'selected-element-item element-item';
       elementItem.dataset.elementId = element.elementId;
-      
-      // Create a container for the label and delete button
-      const labelContainer = document.createElement('div');
-      labelContainer.className = 'element-label-container';
-      labelContainer.style.display = 'flex';
-      labelContainer.style.justifyContent = 'space-between';
-      labelContainer.style.alignItems = 'center';
-      labelContainer.style.marginBottom = '5px';
-      
-      // Create label
-      const elementLabel = document.createElement('div');
-      elementLabel.className = 'element-label';
-      elementLabel.textContent = `${index + 1}. ${element.label}`;
-      labelContainer.appendChild(elementLabel);
-      
+
+      // Create the label
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'element-label';
+      labelSpan.textContent = element.label || `Element ${element.elementId.substring(0, 6)}...`;
+      elementItem.appendChild(labelSpan);
+
+      // Create the tag info
+      const tagInfo = document.createElement('span');
+      tagInfo.className = 'element-tag-info';
+      tagInfo.textContent = element.tagName || '';
+      elementItem.appendChild(tagInfo);
+
       // Create delete button
       const deleteButton = document.createElement('button');
-      deleteButton.className = 'element-delete-btn';
-      deleteButton.textContent = 'Delete';
-      deleteButton.style.backgroundColor = '#f44336';
-      deleteButton.style.color = 'white';
-      deleteButton.style.border = 'none';
-      deleteButton.style.borderRadius = '4px';
-      deleteButton.style.padding = '3px 8px';
-      deleteButton.style.fontSize = '12px';
-      deleteButton.style.cursor = 'pointer';
-      
-      // Add event listener to delete button
-      deleteButton.addEventListener('click', (event) => {
-        event.preventDefault();
-        // Send message to content script to delete this element
-        chrome.tabs.sendMessage(
-          chrome.devtools ? chrome.devtools.inspectedWindow.tabId : chrome.tabs.TAB_ID_NONE,
-          { 
+      deleteButton.className = 'element-delete-button';
+      deleteButton.setAttribute('title', 'Delete this element');
+      deleteButton.textContent = '×';
+      deleteButton.onclick = async (e) => {
+        e.stopPropagation(); // Prevent triggering the element's click event
+        if (this.log) {
+          this.log(`Deleting element ${element.elementId}`);
+        } else {
+          console.log(`Deleting element ${element.elementId}`);
+        }
+        
+        try {
+          // Send a message to delete this element
+          const tab = await chrome.tabs.get(this.tabId);
+          if (!tab) {
+            if (this.log) {
+              this.log('No tab found to delete element');
+            }
+            return;
+          }
+          
+          chrome.tabs.sendMessage(this.tabId, {
             type: 'delete-element',
             elementId: element.elementId
+          }, response => {
+            if (chrome.runtime.lastError) {
+              if (this.log) {
+                this.log(`Error deleting element: ${chrome.runtime.lastError.message}`);
+              }
+              return;
+            }
+            
+            if (response && response.success) {
+              if (this.log) {
+                this.log(`Element deleted: ${element.elementId}`);
+              }
+              // The content script will send a message that will trigger reloading elements
+            } else {
+              if (this.log) {
+                this.log(`Failed to delete element: ${element.elementId}`, response ? response.error : 'Unknown error');
+              }
+            }
+          });
+        } catch (error) {
+          if (this.log) {
+            this.log(`Error deleting element: ${error.message}`);
           }
-        );
-      });
-      
-      labelContainer.appendChild(deleteButton);
-      elementItem.appendChild(labelContainer);
-      
-      const elementInfo = document.createElement('div');
-      elementInfo.className = 'element-info';
-      elementInfo.textContent = `${element.tagName || 'Unknown'} • ${element.cssSelector || 'No selector'}`;
-      
-      elementItem.appendChild(elementInfo);
-      container.appendChild(elementItem);
+        }
+      };
+      elementItem.appendChild(deleteButton);
+
+      // Add a tooltip with element info
+      const tooltipText = `ID: ${element.elementId}\nTag: ${element.tagName || 'unknown'}\nXPath: ${element.xpath || 'n/a'}`;
+      elementItem.setAttribute('title', tooltipText + '\nRight-click to capture screenshot');
+
+      // Add to the list
+      selectedElementsList.appendChild(elementItem);
     });
+
+    // Add help text about screenshots
+    const helpText = document.createElement('div');
+    helpText.className = 'screenshot-help-text';
+    helpText.textContent = 'Right-click on an element to capture a screenshot';
+    selectedElementsList.appendChild(helpText);
   }
 }
 
