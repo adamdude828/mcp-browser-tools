@@ -51,9 +51,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('startSelectionBtn').addEventListener('click', startElementSelection);
   document.getElementById('highlightAllBtn').addEventListener('click', toggleElementHighlight);
   document.getElementById('clearSelectionsBtn').addEventListener('click', clearAllElements);
+  document.getElementById('reloadZonesBtn').addEventListener('click', reloadZones);
   
   // Listen for socket-emit messages from content scripts via background script
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // Debug all messages received to diagnose the zone issue
+    console.log('Window.js: Received message:', message);
+    
     if (message.type === 'socket-emit' && socketManager.isConnected()) {
       // Debug: Check if the message contains HTML content when zone-added event
       if (message.event === 'zone-added' && message.data) {
@@ -66,6 +70,9 @@ document.addEventListener('DOMContentLoaded', () => {
             (message.data.html.substring(0, 50) + (message.data.html.length > 50 ? '...' : '')) : 
             'none'
         });
+        
+        // Ensure we load selected elements when a zone is added
+        elementSelectionManager.loadSelectedElements();
       }
       
       // Check if this message has already been processed to prevent duplicates
@@ -94,6 +101,15 @@ document.addEventListener('DOMContentLoaded', () => {
       sendResponse({ success: true });
       return true;
     }
+    
+    // Also listen for element-selected events directly
+    if (message.type === 'element-selected') {
+      console.log('Window.js: Received element-selected event:', message);
+      // Make sure we update the UI
+      elementSelectionManager.loadSelectedElements();
+      return true;
+    }
+    
     return false;
   });
   
@@ -252,6 +268,58 @@ function clearAllElements() {
   elementSelectionManager.clearAllElements()
     .catch(error => {
       uiUpdater.log('Error clearing elements', error.message);
+    });
+}
+
+// Reload all zones and refresh screenshots
+function reloadZones() {
+  uiUpdater.log('Reloading all zones and refreshing screenshots...');
+  
+  // First load the selected elements to get the current list
+  elementSelectionManager.loadSelectedElements()
+    .then(elements => {
+      // Detailed logging about what elements we found
+      uiUpdater.log(`Found ${elements.length} zones to reload`);
+      
+      if (elements.length === 0) {
+        uiUpdater.log('No zones found to reload');
+        return;
+      }
+      
+      // Log each element's details for debugging
+      elements.forEach((element, index) => {
+        uiUpdater.log(`Zone ${index + 1}: ID=${element.elementId}, Label=${element.label || 'No Label'}, Tag=${element.tagName}`);
+        console.log('Detailed zone info:', element);
+      });
+      
+      // Capture screenshots for each element one by one
+      const capturePromises = elements.map(element => {
+        // Add detailed log before attempting capture
+        uiUpdater.log(`Attempting to capture screenshot for zone: ${element.label || element.elementId}`);
+        
+        return elementSelectionManager.captureElementScreenshot(element.elementId)
+          .then((result) => {
+            uiUpdater.log(`✅ Successfully refreshed screenshot for zone: ${element.label || element.elementId}`);
+            console.log('Screenshot capture result:', result);
+            return true;
+          })
+          .catch(error => {
+            uiUpdater.log(`❌ Failed to refresh screenshot for zone: ${element.label || element.elementId}`, error.message);
+            console.error('Screenshot capture error:', error);
+            return false;
+          });
+      });
+      
+      // When all are done, show summary
+      Promise.allSettled(capturePromises)
+        .then(results => {
+          const successful = results.filter(r => r.status === 'fulfilled' && r.value === true).length;
+          uiUpdater.log(`Reload complete: ${successful} of ${elements.length} zones refreshed successfully`);
+        });
+    })
+    .catch(error => {
+      uiUpdater.log('Error reloading zones', error.message);
+      console.error('Error in reloadZones:', error);
     });
 }
 

@@ -284,6 +284,8 @@ class SocketConnectionManager {
         data: data
       });
     });
+    
+    /* JavaScript execution functionality removed temporarily */
   }
 }
 

@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { 
   registerTabTitleTool, 
   registerBrowserZonesTool, 
-  registerBrowserZoneDetailsTool, 
+  registerBrowserZoneDetailsTool,
   setupTabSocketHandlers 
 } from "./tabs.js";
 import { registerScreenshotTools } from "./screenshots.js";

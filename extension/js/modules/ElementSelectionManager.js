@@ -311,14 +311,16 @@ class ElementSelectionManager {
   }
 
   /**
-   * Capture screenshot of a selected element
-   * @param {string} elementId - ID of the element to screenshot
-   * @returns {Promise} - Resolves when screenshot is taken and uploaded
+   * Capture and upload a screenshot of an element
+   * @param {string} elementId - The ID of the element to capture
+   * @returns {Promise} - Resolves with the upload result
    */
   captureElementScreenshot(elementId) {
     return new Promise(async (resolve, reject) => {
+      this.logCallback('📸 CAPTURING: Starting screenshot capture process for element ID:', elementId);
+      
       if (!this.tabManager.getSelectedTabId()) {
-        this.logCallback('Cannot capture screenshot: No tab selected');
+        this.logCallback('📸 ERROR: Cannot capture screenshot: No tab selected');
         reject(new Error('No tab selected'));
         return;
       }
@@ -333,17 +335,17 @@ class ElementSelectionManager {
             for (const url in window.io.managers) {
               if (Object.prototype.hasOwnProperty.call(window.io.managers, url)) {
                 this.serverUrl = url.replace(/\/socket\.io\/?$/, '');
-                this.logCallback('Inferred server URL:', this.serverUrl);
+                this.logCallback('📸 INFERRED URL: Inferred server URL:', this.serverUrl);
                 break;
               }
             }
           }
         } catch (error) {
-          this.logCallback('Failed to infer server URL:', error.message);
+          this.logCallback('📸 ERROR: Failed to infer server URL:', error.message);
         }
         
         if (!this.serverUrl) {
-          this.logCallback('No server URL set for screenshot upload');
+          this.logCallback('📸 ERROR: No server URL set for screenshot upload');
           reject(new Error('No server URL set for screenshot upload'));
           return;
         }
@@ -351,22 +353,43 @@ class ElementSelectionManager {
       
       try {
         // Send message to content script to capture screenshot
-        this.logCallback('Sending capture-element-screenshot message for element:', elementId);
+        this.logCallback('📸 SENDING REQUEST: Sending capture-element-screenshot message for element:', elementId);
+        
+        // Look for the element in our selectedElements collection
+        const elementInfo = this.selectedElements.find(el => el.elementId === elementId);
+        if (elementInfo) {
+          this.logCallback('📸 ELEMENT INFO: Found matching element info:', {
+            label: elementInfo.label,
+            tagName: elementInfo.tagName,
+            xpath: elementInfo.xpath,
+            cssSelector: elementInfo.cssSelector
+          });
+        } else {
+          this.logCallback('📸 WARNING: No element info found in selectedElements for ID:', elementId);
+        }
+        
         const response = await this.tabManager.sendMessageToSelectedTab({ 
           type: 'capture-element-screenshot', 
           elementId: elementId
         });
         
+        this.logCallback('📸 RESPONSE: Got response from content script:', {
+          success: response?.success,
+          error: response?.error,
+          hasImageData: !!response?.imageData,
+          imageDataLength: response?.imageData ? response.imageData.length : 0
+        });
+        
         if (response && response.success && response.imageData) {
-          this.logCallback('Screenshot captured successfully, image data length:', response.imageData.length);
+          this.logCallback('📸 CAPTURED: Screenshot captured successfully, image data length:', response.imageData.length);
           
           // Upload the screenshot to the server via REST
           try {
             const uploadUrl = `${this.serverUrl}/api/screenshots`;
-            this.logCallback('Uploading screenshot to:', uploadUrl);
+            this.logCallback('📸 UPLOADING: Sending screenshot to server URL:', uploadUrl);
             
             // Log data being sent
-            this.logCallback('Screenshot POST data:', { 
+            this.logCallback('📸 UPLOAD DATA: ', { 
               elementId, 
               imageDataLength: response.imageData ? response.imageData.length : 0,
               imageDataStart: response.imageData ? response.imageData.substring(0, 50) + '...' : 'none'
@@ -383,19 +406,19 @@ class ElementSelectionManager {
               })
             });
             
-            this.logCallback('Screenshot upload response status:', uploadResponse.status);
+            this.logCallback('📸 UPLOAD RESPONSE: Status code:', uploadResponse.status);
             
             if (uploadResponse.ok) {
               const result = await uploadResponse.json();
-              this.logCallback('Screenshot uploaded successfully:', result);
+              this.logCallback('✅ UPLOAD SUCCESS: Screenshot uploaded successfully:', result);
               resolve(result);
             } else {
               const error = await uploadResponse.text();
-              this.logCallback('Failed to upload screenshot:', error);
+              this.logCallback('❌ UPLOAD FAILED: Failed to upload screenshot:', error);
               
               // Try the alternate endpoint as a fallback
               const alternateUrl = `${this.serverUrl}/api/zones/${elementId}/screenshot`;
-              this.logCallback('Trying alternate endpoint:', alternateUrl);
+              this.logCallback('📸 TRYING ALTERNATE: Attempting upload to alternate endpoint:', alternateUrl);
               
               const alternateResponse = await fetch(alternateUrl, {
                 method: 'POST',
@@ -409,25 +432,25 @@ class ElementSelectionManager {
               
               if (alternateResponse.ok) {
                 const alternateResult = await alternateResponse.json();
-                this.logCallback('Screenshot uploaded successfully to alternate endpoint:', alternateResult);
+                this.logCallback('✅ ALTERNATE SUCCESS: Screenshot uploaded to alternate endpoint:', alternateResult);
                 resolve(alternateResult);
               } else {
                 const alternateError = await alternateResponse.text();
-                this.logCallback('Failed to upload screenshot to alternate endpoint:', alternateError);
+                this.logCallback('❌ ALTERNATE FAILED: Failed to upload to alternate endpoint:', alternateError);
                 reject(new Error(`Failed to upload screenshot: ${alternateError}`));
               }
             }
           } catch (uploadError) {
-            this.logCallback('Error uploading screenshot:', uploadError.message);
+            this.logCallback('❌ UPLOAD ERROR: Error uploading screenshot:', uploadError.message);
             reject(uploadError);
           }
         } else {
           const errorMsg = (response && response.error) || 'Unknown error capturing screenshot';
-          this.logCallback('Failed to capture screenshot:', errorMsg);
+          this.logCallback('❌ CAPTURE FAILED: Failed to capture screenshot:', errorMsg);
           reject(new Error(errorMsg));
         }
       } catch (error) {
-        this.logCallback('Error capturing screenshot:', error.message);
+        this.logCallback('❌ ERROR: Error capturing screenshot:', error.message);
         reject(error);
       }
     });

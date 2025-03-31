@@ -291,4 +291,9 @@ export function registerBrowserZoneDeleteTool(server: McpServer): void {
     }
   );
 }
-*/ 
+*/
+
+/* 
+ * Note: JavaScript execution tool has been temporarily removed.
+ * A more robust implementation that works with CSP restrictions will be added later.
+ */ 

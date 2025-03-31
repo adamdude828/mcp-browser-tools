@@ -49,31 +49,50 @@ window.browserConnectAPI = {
   },
   // Add screenshot capability to the browserConnectAPI
   captureElementScreenshot: function(elementId) {
-    console.log('🔍 DEBUG: Window API captureElementScreenshot called for', elementId);
-    if (!elementSelector) return { success: false, error: 'ElementSelector not initialized' };
+    console.log('📸 DEBUG: Content script captureElementScreenshot called for element ID:', elementId);
+    if (!elementSelector) {
+      console.error('❌ ERROR: ElementSelector not initialized for screenshot capture');
+      return { success: false, error: 'ElementSelector not initialized' };
+    }
     
     if (typeof html2canvas === 'undefined') {
-      console.error('🚨 ERROR: html2canvas not available for screenshot');
+      console.error('❌ ERROR: html2canvas library not available for screenshot capture');
       return { success: false, error: 'html2canvas not available' };
     }
     
     try {
-      const element = document.querySelector(`[data-extension-element-id="${elementId}"]`);
+      // Use the findElementById helper function instead of direct querySelector
+      const element = findElementById(elementId);
       if (!element) {
-        console.error('Element not found for screenshot:', elementId);
+        console.error('❌ ERROR: Element not found for screenshot capture:', elementId);
         return { success: false, error: 'Element not found' };
       }
       
+      console.log('📸 DEBUG: Element found for screenshot, dimensions:', {
+        width: element.offsetWidth,
+        height: element.offsetHeight,
+        tagName: element.tagName,
+        className: element.className
+      });
+      
       // Return a promise that will resolve with the screenshot data
       return new Promise((resolve, reject) => {
+        console.log('📸 DEBUG: Starting html2canvas capture process');
         html2canvas(element, {
           allowTaint: true,
           useCORS: true,
           logging: false,
           scale: window.devicePixelRatio
         }).then(canvas => {
+          console.log('📸 DEBUG: Canvas created successfully:', {
+            width: canvas.width,
+            height: canvas.height,
+            devicePixelRatio: window.devicePixelRatio
+          });
+          
           // Convert canvas to base64 image data
           const imageData = canvas.toDataURL('image/png');
+          console.log('📸 DEBUG: Screenshot captured successfully, data length:', imageData.length);
           
           resolve({ 
             success: true, 
@@ -82,12 +101,12 @@ window.browserConnectAPI = {
             height: canvas.height
           });
         }).catch(error => {
-          console.error('Error capturing screenshot:', error);
+          console.error('❌ ERROR: html2canvas screenshot capture failed:', error);
           reject({ success: false, error: error.message });
         });
       });
     } catch (error) {
-      console.error('Error in screenshot capture:', error);
+      console.error('❌ ERROR: Exception in screenshot capture process:', error);
       return { success: false, error: error.message };
     }
   }
@@ -178,8 +197,15 @@ function initializeMessageHandler() {
     }
     
     if (message.type === 'get-selected-elements') {
-      const elements = elementSelector.getSelectedElementsData();
-      sendResponse({ elements });
+      try {
+        console.log('🔍 DEBUG: Processing get-selected-elements message');
+        const elements = elementSelector.getSelectedElementsData();
+        console.log(`🔍 DEBUG: Sending ${elements.length} elements in response`);
+        sendResponse({ success: true, elements: elements });
+      } catch (error) {
+        console.error('🚨 ERROR: Error in get-selected-elements:', error);
+        sendResponse({ success: false, elements: [], error: error.message });
+      }
       return true;
     }
     
@@ -217,14 +243,46 @@ function initializeMessageHandler() {
     if (message.type === 'capture-element-screenshot') {
       console.log('🔍 DEBUG: Received capture-element-screenshot message for element:', message.elementId);
       try {
-        const element = document.querySelector(`[data-extension-element-id="${message.elementId}"]`);
+        const element = findElementById(message.elementId);
+        
         if (!element) {
-          console.error('Element not found for screenshot:', message.elementId);
+          console.error('❌ ERROR: Element not found for screenshot:', message.elementId);
+          console.log('🔍 DEBUG: Document current URL:', document.location.href);
+          
+          // Debug: Check how many elements exist with data-extension attributes
+          const allExtensionElements = document.querySelectorAll('[data-extension-element-id]');
+          console.log(`🔍 DEBUG: Found ${allExtensionElements.length} elements with data-extension-element-id attributes`);
+          
+          if (allExtensionElements.length > 0) {
+            console.log('🔍 DEBUG: Listing available element IDs:');
+            allExtensionElements.forEach(el => {
+              console.log(`- ${el.getAttribute('data-extension-element-id')}: ${el.tagName} ${el.className}`);
+            });
+          }
+          
+          // Check if our element selector has selected elements
+          if (elementSelector && elementSelector.selectedElements) {
+            console.log(`🔍 DEBUG: Element selector has ${elementSelector.selectedElements.size} selected elements`);
+            
+            if (elementSelector.selectedElements.size > 0) {
+              console.log('🔍 DEBUG: Listing available elements in the selectedElements map:');
+              elementSelector.selectedElements.forEach((data, id) => {
+                console.log(`- ${id}: ${data.element ? data.element.tagName : 'null'} (${data.label || 'no label'})`);
+              });
+            }
+          }
+          
           sendResponse({ success: false, error: 'Element not found' });
           return true;
         }
         
         console.log('🔍 DEBUG: Found element for screenshot, dimensions:', element.offsetWidth, 'x', element.offsetHeight);
+        console.log('🔍 DEBUG: Element details:', {
+          tagName: element.tagName,
+          className: element.className,
+          id: element.id,
+          textContent: element.textContent ? element.textContent.substring(0, 50) + '...' : '(no text)'
+        });
         
         // Use html2canvas to capture the element
         console.log('🔍 DEBUG: Starting html2canvas capture...');
@@ -555,6 +613,12 @@ function injectElementSelector() {
         data: zoneData
       });
       
+      // Also send the element-selected message to ensure window UI updates
+      chrome.runtime.sendMessage({
+        type: 'element-selected',
+        data: elementData
+      });
+      
       // If HTML was truncated, send the full HTML via REST API
       if (elementData.htmlTruncated) {
         console.log(`🔍 DEBUG: HTML was truncated (${fullHtml.length} chars), sending full HTML via REST API`);
@@ -823,18 +887,19 @@ function injectElementSelector() {
       }
     },
     
+    // Get data for all selected elements
     getSelectedElementsData() {
-      // Convert map to array for response
+      console.log('🔍 DEBUG: getSelectedElementsData called, elements count:', this.selectedElements.size);
+      
       const elements = [];
       this.selectedElements.forEach((data, id) => {
-        elements.push({
-          elementId: id,
-          label: data.label,
-          xpath: data.xpath || '',
-          cssSelector: data.cssSelector || '',
-          innerText: data.element ? (data.element.innerText || '').substring(0, 100) : ''
-        });
+        const { element, ...elementData } = data; // Remove actual DOM element reference
+        elements.push(elementData);
       });
+      
+      // Log the elements list we're returning
+      console.log('🔍 DEBUG: Returning elements:', elements.map(e => `${e.label} (${e.elementId})`));
+      
       return elements;
     },
     
@@ -992,4 +1057,46 @@ function verifyScriptContext() {
   
   // Send initial content-script-ready message, response: { success: true, received: true }
   console.log('🔍 DEBUG: Sent initial content-script-ready message');
-})(); 
+})();
+
+// Find element by ID, XPath, or CSS selector - to be used for screenshot capture
+function findElementById(elementId) {
+  // First try by data-extension-element-id attribute (standard approach)
+  const selector = `[data-extension-element-id="${elementId}"]`;
+  console.log('🔍 DEBUG: Looking for element with selector:', selector);
+  
+  const elementByAttribute = document.querySelector(selector);
+  if (elementByAttribute) {
+    console.log('🔍 DEBUG: Found element via data-extension-element-id attribute');
+    return elementByAttribute;
+  }
+  
+  console.log('🔍 DEBUG: Element not found via data-extension-element-id attribute, checking for browserConnectId attribute');
+  
+  // Check if we have the element in the elementSelector's selectedElements map
+  if (elementSelector && elementSelector.selectedElements) {
+    // Try to find by direct reference from the selectedElements map
+    const selectedElementData = elementSelector.selectedElements.get(elementId);
+    if (selectedElementData && selectedElementData.element) {
+      console.log('🔍 DEBUG: Found element via selectedElements map reference');
+      
+      // Set the data-extension-element-id attribute if it doesn't exist
+      if (!selectedElementData.element.hasAttribute('data-extension-element-id')) {
+        try {
+          selectedElementData.element.setAttribute('data-extension-element-id', elementId);
+          console.log('🔍 DEBUG: Added missing data-extension-element-id attribute to the element');
+        } catch (error) {
+          console.error('🔍 ERROR: Could not set data-extension-element-id attribute:', error);
+        }
+      }
+      
+      return selectedElementData.element;
+    }
+    
+    console.log('🔍 DEBUG: Element not found in selectedElements map by ID:', elementId);
+  }
+
+  // We couldn't find the element
+  console.log('🔍 DEBUG: Element not found using any method');
+  return null;
+} 
