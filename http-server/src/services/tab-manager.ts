@@ -273,6 +273,55 @@ class TabManager {
   getSocketById(socketId: string): Socket | undefined {
     return this.sockets.get(socketId);
   }
+  
+  /**
+   * Update HTML content for a specific zone by socket ID and element ID
+   * @param socketId The socket ID
+   * @param elementId The element ID
+   * @param html The HTML content
+   * @returns True if updated successfully, false if zone not found
+   */
+  updateZoneHtml(socketId: string, elementId: string, html: string): boolean {
+    const zones = this.zones.get(socketId) || [];
+    const zoneIndex = zones.findIndex(zone => zone.elementId === elementId);
+    
+    if (zoneIndex === -1) {
+      return false;
+    }
+    
+    // Update the HTML content
+    zones[zoneIndex].html = html;
+    this.zones.set(socketId, zones);
+    
+    console.log(`TabManager: Updated HTML for zone ${elementId} (socket: ${socketId}), HTML length: ${html.length}`);
+    return true;
+  }
+  
+  /**
+   * Update HTML content for any zone matching the element ID across all sockets
+   * @param elementId The element ID
+   * @param html The HTML content
+   * @returns True if at least one zone was updated, false if no matching zones
+   */
+  updateAnyZoneHtml(elementId: string, html: string): boolean {
+    let updated = false;
+    
+    // Check all sockets for the matching element ID
+    for (const [socketId, zones] of this.zones.entries()) {
+      const zoneIndex = zones.findIndex(zone => zone.elementId === elementId);
+      
+      if (zoneIndex !== -1) {
+        // Update the HTML content
+        zones[zoneIndex].html = html;
+        this.zones.set(socketId, zones);
+        updated = true;
+        
+        console.log(`TabManager: Updated HTML for zone ${elementId} (socket: ${socketId}), HTML length: ${html.length}`);
+      }
+    }
+    
+    return updated;
+  }
 }
 
 // Export a singleton instance

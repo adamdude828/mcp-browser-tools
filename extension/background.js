@@ -7,6 +7,9 @@ const contentScriptReadyTabs = new Set();
 // Queue of pending tasks by tab ID
 const pendingTasks = new Map();
 
+// Server URL
+let serverUrl = null;
+
 // Debug helper function
 function logDebug(message, data) {
   const timestamp = new Date().toISOString().split('T')[1].replace('Z', '');
@@ -20,9 +23,24 @@ function logError(message, data) {
 
 // Initialize extension
 chrome.runtime.onInstalled.addListener(() => {
-  // Default server URL
-  chrome.storage.sync.set({ serverUrl: "http://localhost:3000" });
-  logDebug('Extension installed/updated');
+  logDebug('Extension installed');
+  // Set default server URL
+  chrome.storage.sync.get(['serverUrl'], (result) => {
+    if (!result.serverUrl) {
+      logDebug('Setting default server URL');
+      chrome.storage.sync.set({ serverUrl: "http://localhost:3000" });
+    } else {
+      serverUrl = result.serverUrl; // Initialize server URL from storage
+    }
+  });
+});
+
+// Load server URL from storage on startup
+chrome.storage.sync.get(['serverUrl'], (result) => {
+  if (result.serverUrl) {
+    serverUrl = result.serverUrl;
+    logDebug('Loaded server URL from storage:', serverUrl);
+  }
 });
 
 // When extension icon is clicked
@@ -59,6 +77,13 @@ chrome.windows.onRemoved.addListener((removedWindowId) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   logDebug('Received message', { type: message.type, sender: sender.id });
   
+  // Handle get-server-url message
+  if (message.type === 'get-server-url') {
+    logDebug('Received get-server-url request');
+    sendResponse({ serverUrl: serverUrl });
+    return true;
+  }
+
   // Handle content script ready message
   if (message.type === 'content-script-ready') {
     // Mark this tab as having a ready content script
@@ -637,4 +662,53 @@ function tryToggleViaMessage(tabId) {
   } catch (unexpectedError) {
     logError('Unexpected error in tryToggleViaMessage', unexpectedError.message);
   }
+}
+
+// Function to handle server connection
+function connectToServer(url) {
+  logDebug('Connecting to server', url);
+  serverUrl = url; // Store the server URL
+  
+  // Check if server is available
+  fetch(`${url}/status`)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      logDebug('Server is available', data);
+      // Store URL in sync storage
+      chrome.storage.sync.set({ serverUrl: url });
+      // Notify connection status
+      chrome.runtime.sendMessage({
+        type: 'server-connection-status',
+        status: 'connected',
+        serverUrl: url
+      });
+    })
+    .catch(error => {
+      logError('Server is not available', error.message);
+      // Notify connection status
+      chrome.runtime.sendMessage({
+        type: 'server-connection-status',
+        status: 'error',
+        error: error.message,
+        serverUrl: url
+      });
+    });
+}
+
+// Function to update server URL
+function updateServerUrl(url) {
+  if (url && url.trim()) {
+    serverUrl = url.trim();
+    // Store in sync storage
+    chrome.storage.sync.set({ serverUrl });
+    
+    logDebug('Server URL updated:', serverUrl);
+    return true;
+  }
+  return false;
 } 

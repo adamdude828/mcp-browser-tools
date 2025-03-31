@@ -399,6 +399,14 @@ function injectElementSelector() {
       // Create a unique ID for the element
       const elementId = `browser-connect-element-${this.nextElementId++}`;
       
+      // Get the HTML content, but truncate it for the initial socket message
+      const fullHtml = element.outerHTML;
+      const MAX_SOCKET_HTML_LENGTH = 1000; // Max HTML length to include in socket message
+      const htmlIsTruncated = fullHtml.length > MAX_SOCKET_HTML_LENGTH;
+      const truncatedHtml = htmlIsTruncated 
+        ? fullHtml.substring(0, MAX_SOCKET_HTML_LENGTH) + '...' 
+        : fullHtml;
+        
       // Extract element information
       const elementData = {
         elementId,
@@ -408,7 +416,8 @@ function injectElementSelector() {
         cssSelector: getCssSelector(element),
         innerText: element.innerText ? element.innerText.substring(0, 100).replace(/\s+/g, ' ').trim() : '',
         tagName: element.tagName.toLowerCase(),
-        html: element.outerHTML, // Add HTML content
+        html: truncatedHtml, // Use truncated HTML for socket message
+        htmlTruncated: htmlIsTruncated, // Flag if HTML was truncated
         timestamp: Date.now()
       };
       
@@ -421,7 +430,8 @@ function injectElementSelector() {
         cssSelector: elementData.cssSelector,
         innerText: elementData.innerText,
         tagName: elementData.tagName,
-        html: elementData.html, // Add the HTML content
+        html: elementData.html, // Use truncated HTML
+        htmlTruncated: elementData.htmlTruncated, // Flag if HTML was truncated
         timestamp: elementData.timestamp
       };
       
@@ -434,10 +444,54 @@ function injectElementSelector() {
       // Notify extension that an element was selected AND send the zone data
       // Combined approach to avoid duplicates
       chrome.runtime.sendMessage({
-        type: 'element-selected',
-        data: zoneData,
-        forSocket: true // Flag to indicate this should be sent to socket as well
+        type: 'socket-emit',
+        event: 'zone-added',
+        data: zoneData
       });
+      
+      // If HTML was truncated, send the full HTML via REST API
+      if (elementData.htmlTruncated) {
+        console.log(`🔍 DEBUG: HTML was truncated (${fullHtml.length} chars), sending full HTML via REST API`);
+        
+        // Get the server URL from the extension
+        chrome.runtime.sendMessage({ type: 'get-server-url' }, (response) => {
+          if (response && response.serverUrl) {
+            const serverUrl = response.serverUrl;
+            
+            // Send the full HTML via fetch API with exponential backoff retry
+            const sendFullHtml = (retryCount = 0, maxRetries = 3, delay = 1000) => {
+              fetch(`${serverUrl}/api/zones/${elementId}/html`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  html: fullHtml
+                })
+              })
+              .then(response => response.json())
+              .then(data => {
+                console.log(`🔍 DEBUG: Full HTML sent successfully:`, data);
+              })
+              .catch(error => {
+                console.error(`🚨 ERROR: Failed to send full HTML:`, error);
+                
+                // Retry with exponential backoff
+                if (retryCount < maxRetries) {
+                  const nextDelay = delay * 2;
+                  console.log(`🔍 DEBUG: Retrying in ${delay}ms (${retryCount + 1}/${maxRetries})`);
+                  setTimeout(() => sendFullHtml(retryCount + 1, maxRetries, nextDelay), delay);
+                }
+              });
+            };
+            
+            // Start the sending process
+            sendFullHtml();
+          } else {
+            console.error(`🚨 ERROR: Failed to get server URL from extension`);
+          }
+        });
+      }
       
       console.log('Element selected:', elementData);
     },
