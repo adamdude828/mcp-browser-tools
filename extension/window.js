@@ -53,6 +53,20 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clearSelectionsBtn').addEventListener('click', clearAllElements);
   document.getElementById('reloadZonesBtn').addEventListener('click', reloadZones);
   
+  // Add debug button for content script verification
+  const debugBtn = document.createElement('button');
+  debugBtn.id = 'verifyContentScriptBtn';
+  debugBtn.className = 'btn btn-secondary btn-sm';
+  debugBtn.innerHTML = '<i class="fas fa-bug"></i> Verify Content Script';
+  debugBtn.title = 'Check if content script is properly loaded in the active tab';
+  debugBtn.addEventListener('click', verifyContentScript);
+  
+  // Add to buttons container
+  const buttonsContainer = document.querySelector('.action-buttons');
+  if (buttonsContainer) {
+    buttonsContainer.appendChild(debugBtn);
+  }
+  
   // Listen for custom refresh zones event from socket handler
   window.addEventListener('browser-connect-refresh-zones', (event) => {
     uiUpdater.log(`Received server request to refresh zones (requestId: ${event.detail.requestId})`);
@@ -406,4 +420,165 @@ socketManager.onConnect((socket) => {
   // Set the server URL for screenshot uploads (remove /socket.io)
   const baseServerUrl = socketManager.serverUrl.replace(/\/socket\.io\/?$/, '');
   elementSelectionManager.setServerUrl(baseServerUrl);
-}); 
+});
+
+// Verify content script in active tab
+function verifyContentScript() {
+  uiUpdater.log('Verifying content script in active tab...');
+  
+  chrome.runtime.sendMessage({ type: 'verify-content-script' }, (response) => {
+    if (chrome.runtime.lastError) {
+      uiUpdater.log('Error verifying content script', chrome.runtime.lastError.message);
+      return;
+    }
+    
+    if (!response || !response.success) {
+      uiUpdater.log('Verification failed', response?.error || 'Unknown error');
+      return;
+    }
+    
+    const result = response.result;
+    
+    if (result.loaded) {
+      uiUpdater.log('✅ Content script is loaded and responding', {
+        tabId: response.tabId,
+        initialized: result.initialized ? 'Yes' : 'No',
+        domReady: result.domReady ? 'Yes' : 'No'
+      });
+      
+      // If we have a tab ID, offer to reload the content script or reinitialize ShadowDOM
+      if (response.tabId) {
+        // Create actions container
+        const actionsContainer = document.createElement('div');
+        actionsContainer.className = 'mt-2';
+        
+        // Create reload button
+        const reloadBtn = document.createElement('button');
+        reloadBtn.className = 'btn btn-sm btn-warning me-2';
+        reloadBtn.textContent = 'Reload Script';
+        reloadBtn.addEventListener('click', () => {
+          reloadContentScript(response.tabId);
+        });
+        actionsContainer.appendChild(reloadBtn);
+        
+        // Create reinitialize Shadow DOM button
+        const reinitBtn = document.createElement('button');
+        reinitBtn.className = 'btn btn-sm btn-info';
+        reinitBtn.textContent = 'Reinit ShadowDOM';
+        reinitBtn.title = 'Reload the ShadowDOMHighlighter and re-initialize element tracking';
+        reinitBtn.addEventListener('click', () => {
+          reinitializeShadowDOM(response.tabId);
+        });
+        actionsContainer.appendChild(reinitBtn);
+        
+        // Add to log entry
+        const logEntry = document.querySelector('.log-entry:last-child');
+        if (logEntry) {
+          logEntry.appendChild(actionsContainer);
+        }
+      }
+    } else {
+      uiUpdater.log('❌ Content script verification failed', {
+        error: result.error || 'Unknown error',
+        tabId: response.tabId,
+        url: response.url
+      });
+      
+      // Offer to inject the content script
+      const injectBtn = document.createElement('button');
+      injectBtn.className = 'btn btn-sm btn-primary ms-2';
+      injectBtn.textContent = 'Force Inject Script';
+      injectBtn.addEventListener('click', () => {
+        injectContentScript(response.tabId);
+      });
+      
+      // Add to log entry
+      const logEntry = document.querySelector('.log-entry:last-child');
+      if (logEntry) {
+        logEntry.appendChild(injectBtn);
+      }
+    }
+  });
+}
+
+// Reload content script in a tab
+function reloadContentScript(tabId) {
+  uiUpdater.log(`Reloading content script in tab ${tabId}...`);
+  
+  chrome.tabs.reload(tabId, {}, () => {
+    if (chrome.runtime.lastError) {
+      uiUpdater.log('Error reloading tab', chrome.runtime.lastError.message);
+    } else {
+      uiUpdater.log('Tab reloaded successfully. Please wait a moment and try again.');
+    }
+  });
+}
+
+// Force inject content script
+function injectContentScript(tabId) {
+  uiUpdater.log(`Forcing content script injection into tab ${tabId}...`);
+  
+  chrome.tabs.executeScript(tabId, { file: 'content-script.js' }, (results) => {
+    if (chrome.runtime.lastError) {
+      uiUpdater.log('Error injecting content script', chrome.runtime.lastError.message);
+    } else {
+      uiUpdater.log('Content script injection attempted', results);
+      
+      // Verify after a short delay
+      setTimeout(() => {
+        verifyContentScript();
+      }, 1000);
+    }
+  });
+}
+
+// Reinitialize ShadowDOM in the content script
+function reinitializeShadowDOM(tabId) {
+  uiUpdater.log(`Reinitializing ShadowDOM in tab ${tabId}...`);
+  
+  chrome.tabs.executeScript(tabId, {
+    code: `
+      // Attempt to reload the ShadowDOMHighlighter
+      try {
+        // Create a script element to load the ShadowDOMHighlighter
+        const script = document.createElement('script');
+        script.type = 'text/javascript';
+        script.src = '${chrome.runtime.getURL('js/direct/ShadowDOMHighlighter.js')}';
+        script.onload = () => {
+          console.log('🔍 DEBUG: ShadowDOMHighlighter reloaded successfully');
+          // Try to reinitialize tracking
+          if (window.elementSelector) {
+            console.log('🔍 DEBUG: Reinitializing element tracking');
+            window.elementSelector.initializeTracking();
+          } else {
+            console.error('🚨 ERROR: elementSelector not found in window');
+          }
+        };
+        script.onerror = (error) => {
+          console.error('🚨 ERROR: Failed to reload ShadowDOMHighlighter:', error);
+        };
+        
+        // Remove any existing script first
+        const existingScript = document.querySelector('script[src*="ShadowDOMHighlighter.js"]');
+        if (existingScript) {
+          existingScript.remove();
+        }
+        
+        // Add the new script
+        document.head.appendChild(script);
+        
+        // Return success
+        "ShadowDOM reinitialization triggered";
+      } catch (error) {
+        console.error('🚨 ERROR: Failed to reinitialize ShadowDOM:', error);
+        error.message;
+      }
+    `
+  }, (results) => {
+    if (chrome.runtime.lastError) {
+      uiUpdater.log('Error reinitializing ShadowDOM', chrome.runtime.lastError.message);
+    } else {
+      uiUpdater.log('ShadowDOM reinitialization attempt', results?.[0]?.result || 'No result');
+    }
+  });
+} 

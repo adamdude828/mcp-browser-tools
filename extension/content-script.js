@@ -2,6 +2,45 @@
 // This script manages element selection and highlighting in the browser tab
 // It uses modularized components to handle different responsibilities
 
+// Try to load ShadowDOMHighlighter if available
+let ShadowDOMHighlighter;
+try {
+  // First, check if it's already in the window object (helpful for module systems)
+  if (window.ShadowDOMHighlighter) {
+    ShadowDOMHighlighter = window.ShadowDOMHighlighter;
+    console.log('🔍 DEBUG: ShadowDOMHighlighter found in window object');
+  } else {
+    // Otherwise, load the script directly
+    console.log('🔍 DEBUG: Loading ShadowDOMHighlighter script dynamically');
+    
+    // Create a script element to load the ShadowDOMHighlighter
+    const script = document.createElement('script');
+    script.type = 'text/javascript'; // Use standard script type
+    script.src = chrome.runtime.getURL('js/direct/ShadowDOMHighlighter.js');
+    script.onload = () => {
+      console.log('🔍 DEBUG: ShadowDOMHighlighter script loaded successfully');
+      // After script loads, check if it registered itself globally
+      if (window.ShadowDOMHighlighter) {
+        ShadowDOMHighlighter = window.ShadowDOMHighlighter;
+        console.log('🔍 DEBUG: ShadowDOMHighlighter object found and initialized');
+        // Reinitialize ElementSelector to use the new ShadowDOMHighlighter
+        if (elementSelector) {
+          console.log('🔍 DEBUG: Reinitializing element tracking with ShadowDOMHighlighter');
+          elementSelector.initializeTracking();
+        }
+      } else {
+        console.error('🚨 ERROR: ShadowDOMHighlighter script loaded but object not found in window');
+      }
+    };
+    script.onerror = (error) => {
+      console.error('🚨 ERROR: Failed to load ShadowDOMHighlighter script:', error);
+    };
+    document.head.appendChild(script);
+  }
+} catch (error) {
+  console.error('🚨 ERROR: Failed to load ShadowDOMHighlighter:', error);
+}
+
 console.log('🔍 BROWSER CONNECT CONTENT SCRIPT LOADED', new Date().toISOString());
 
 // Check for html2canvas
@@ -111,6 +150,9 @@ window.browserConnectAPI = {
     }
   }
 };
+
+// Expose elementSelector globally for easier access from page context
+window.elementSelector = null;
 
 // Wait for DOM to be ready
 function waitForDOM(callback) {
@@ -430,16 +472,71 @@ function injectElementSelector() {
     nextElementId: 1,
     highlightedElement: null,
     
+    // Initialize shadow DOM highlighter if available
+    shadowDOMHighlighter: null,
+    useShadowDOM: false,
+    
+    // Initialize tracking
+    initializeTracking() {
+      console.log('🔍 DEBUG: Initializing element tracking...');
+      
+      // Check if ShadowDOMHighlighter is available
+      if (window.ShadowDOMHighlighter || ShadowDOMHighlighter) {
+        try {
+          // Use the global version if available, otherwise use the module version
+          const HighlighterClass = window.ShadowDOMHighlighter || ShadowDOMHighlighter;
+          console.log('🔍 DEBUG: Found ShadowDOMHighlighter, creating instance');
+          this.shadowDOMHighlighter = new HighlighterClass();
+          this.useShadowDOM = true;
+          this.shadowDOMHighlighter.setupElementTracking();
+          console.log('🔍 DEBUG: Successfully initialized ShadowDOM highlighting for React compatibility');
+          return true;
+        } catch (error) {
+          console.error('🚨 ERROR: Failed to initialize ShadowDOMHighlighter:', error);
+          this.useShadowDOM = false;
+        }
+      } else {
+        console.log('🔍 DEBUG: ShadowDOMHighlighter not available, using classic highlighting');
+        this.useShadowDOM = false;
+        
+        // Set up a retry mechanism in case the script loads later
+        if (!this._trackingRetryAttempted) {
+          this._trackingRetryAttempted = true;
+          
+          console.log('🔍 DEBUG: Setting up retry for ShadowDOM initialization');
+          setTimeout(() => {
+            console.log('🔍 DEBUG: Checking for ShadowDOMHighlighter after delay...');
+            if (window.ShadowDOMHighlighter) {
+              console.log('🔍 DEBUG: ShadowDOMHighlighter available after delay, initializing');
+              this.initializeTracking();
+            } else {
+              console.log('🔍 DEBUG: ShadowDOMHighlighter still not available after delay');
+            }
+          }, 2000); // Try again after 2 seconds (increased from 1 second)
+        }
+      }
+      
+      return false;
+    },
+    
     // Setup mouse event listeners
     setupEventListeners() {
       document.addEventListener('mousemove', this.handleMouseMove.bind(this));
       document.addEventListener('click', this.handleClick.bind(this), true); // Capture phase
+      
+      // Initialize tracking if using Shadow DOM
+      this.initializeTracking();
     },
     
     // Remove event listeners
     removeEventListeners() {
       document.removeEventListener('mousemove', this.handleMouseMove.bind(this));
       document.removeEventListener('click', this.handleClick.bind(this), true);
+      
+      // Clean up shadow DOM highlighter if it exists
+      if (this.shadowDOMHighlighter) {
+        this.shadowDOMHighlighter.cleanup();
+      }
     },
     
     // Handle socket messages via background script
@@ -462,7 +559,9 @@ function injectElementSelector() {
       if (!this.selectionMode) return;
       
       // Skip if it's one of our own UI elements
-      if (event.target.closest('#browser-connect-selection-indicator') || 
+      if (event.target.closest('[data-browser-connect-highlight-host]') || 
+          event.target.closest('[data-browser-connect-temp-highlight-host]') ||
+          event.target.closest('#browser-connect-selection-indicator') || 
           event.target.closest('.browser-connect-element-highlight') ||
           event.target.closest('.browser-connect-modal')) {
         return;
@@ -477,7 +576,9 @@ function injectElementSelector() {
       if (!this.selectionMode) return;
       
       // Skip if it's one of our own UI elements
-      if (event.target.closest('#browser-connect-selection-indicator') || 
+      if (event.target.closest('[data-browser-connect-highlight-host]') || 
+          event.target.closest('[data-browser-connect-temp-highlight-host]') ||
+          event.target.closest('#browser-connect-selection-indicator') || 
           event.target.closest('.browser-connect-element-highlight') ||
           event.target.closest('.browser-connect-modal')) {
         return;
@@ -487,8 +588,12 @@ function injectElementSelector() {
       event.preventDefault();
       event.stopPropagation();
       
-      // Select the element
-      this.selectElement(event.target);
+      // Select the element - use best element finder if using Shadow DOM
+      const elementToSelect = this.useShadowDOM 
+        ? this.findBestElementToSelect(event.target) 
+        : event.target;
+        
+      this.selectElement(elementToSelect);
     },
     
     // Highlight an element temporarily (during mouse hover)
@@ -496,7 +601,15 @@ function injectElementSelector() {
       // Clear previous highlight
       this.clearTempHighlight();
       
-      // Create highlight
+      // Select the best target element (may need to walk up the tree for React components)
+      if (this.useShadowDOM) {
+        const bestTarget = this.findBestElementToSelect(element);
+        this.highlightedElement = bestTarget;
+        this.shadowDOMHighlighter.createTemporaryHighlight(bestTarget);
+        return;
+      }
+      
+      // Fall back to classic highlighting if Shadow DOM is not available
       this.highlightedElement = element;
       
       const rect = element.getBoundingClientRect();
@@ -517,9 +630,49 @@ function injectElementSelector() {
     
     // Clear temporary highlight
     clearTempHighlight() {
+      if (this.useShadowDOM && this.shadowDOMHighlighter) {
+        this.shadowDOMHighlighter.removeTemporaryHighlight();
+        this.highlightedElement = null;
+        return;
+      }
+      
+      // Classic cleanup
       const highlights = document.querySelectorAll('.browser-connect-temp-highlight');
       highlights.forEach(el => el.remove());
       this.highlightedElement = null;
+    },
+    
+    // Find the best element to select (for React apps)
+    findBestElementToSelect(element) {
+      // Look for React component containers
+      let current = element;
+      
+      while (current && current !== document.body) {
+        // Check for common React component indicators
+        if (current.hasAttribute('data-reactroot') || 
+            Object.keys(current).some(key => 
+              key.startsWith('__react') || 
+              key.startsWith('_reactFiber')
+            )) {
+          return current;
+        }
+        
+        // Look for elements with data- attributes, which are often React components
+        if (Array.from(current.attributes).some(attr => attr.name.startsWith('data-'))) {
+          return current;
+        }
+        
+        // Check if this element has a reasonable size (not tiny)
+        const rect = current.getBoundingClientRect();
+        if (rect.width >= 20 && rect.height >= 20 && current !== element) {
+          return current;
+        }
+        
+        current = current.parentElement;
+      }
+      
+      // Fallback to original element
+      return element;
     },
     
     // Select an element and ask for a label
@@ -531,13 +684,28 @@ function injectElementSelector() {
       if (alreadySelectedId) {
         console.log('Element is already selected with ID:', alreadySelectedId);
         // Flash the highlight to indicate it's already selected
-        const highlight = document.querySelector(`.browser-connect-element-highlight[data-element-id="${alreadySelectedId}"]`);
-        if (highlight) {
-          const originalBorder = highlight.style.border;
-          highlight.style.border = '3px solid #FFC107'; // Yellow flash
-          setTimeout(() => {
-            highlight.style.border = originalBorder;
-          }, 1000);
+        if (this.useShadowDOM && this.shadowDOMHighlighter) {
+          const highlightData = this.shadowDOMHighlighter.highlightedElements.get(alreadySelectedId);
+          if (highlightData && highlightData.highlightHost && highlightData.highlightHost.shadowRoot) {
+            const highlight = highlightData.highlightHost.shadowRoot.querySelector('.highlight');
+            if (highlight) {
+              const originalBorder = highlight.style.border;
+              highlight.style.border = '3px solid #FFC107'; // Yellow flash
+              setTimeout(() => {
+                highlight.style.border = originalBorder;
+              }, 1000);
+            }
+          }
+        } else {
+          // Classic approach
+          const highlight = document.querySelector(`.browser-connect-element-highlight[data-element-id="${alreadySelectedId}"]`);
+          if (highlight) {
+            const originalBorder = highlight.style.border;
+            highlight.style.border = '3px solid #FFC107'; // Yellow flash
+            setTimeout(() => {
+              highlight.style.border = originalBorder;
+            }, 1000);
+          }
         }
         return; // Don't allow reselection
       }
@@ -571,13 +739,18 @@ function injectElementSelector() {
         ? fullHtml.substring(0, MAX_SOCKET_HTML_LENGTH) + '...' 
         : fullHtml;
         
+      // For Shadow DOM implementation, get a stable selector
+      const cssSelector = this.useShadowDOM && this.shadowDOMHighlighter
+        ? this.shadowDOMHighlighter.getStableElementIdentifier(element)
+        : getCssSelector(element);
+
       // Extract element information
       const elementData = {
         elementId,
         element,
         label: normalizedLabel, // Use normalized label
         xpath: getXPath(element),
-        cssSelector: getCssSelector(element),
+        cssSelector: cssSelector,
         innerText: element.innerText ? element.innerText.substring(0, 100).replace(/\s+/g, ' ').trim() : '',
         tagName: element.tagName.toLowerCase(),
         html: truncatedHtml, // Use truncated HTML for socket message
@@ -602,8 +775,8 @@ function injectElementSelector() {
       // Add to selected elements map
       this.selectedElements.set(elementId, elementData);
       
-      // Highlight the element permanently
-      this.addPermanentHighlight(element, label, elementId);
+      // Highlight the element permanently - using Shadow DOM if available
+      this.addPermanentHighlight(element, normalizedLabel, elementId);
       
       // Notify extension that an element was selected AND send the zone data
       // Combined approach to avoid duplicates
@@ -730,6 +903,27 @@ function injectElementSelector() {
         console.log('Could not add dataset to element, will rely on object reference:', e);
       }
       
+      // Use Shadow DOM highlighting if available
+      if (this.useShadowDOM && this.shadowDOMHighlighter) {
+        console.log('🔍 DEBUG: Using Shadow DOM for permanent highlight');
+        const highlightHost = this.shadowDOMHighlighter.createIsolatedHighlight(element, elementId, label);
+        
+        // Add delete button click handler
+        if (highlightHost && highlightHost.shadowRoot) {
+          const deleteButton = highlightHost.shadowRoot.querySelector('.delete-button');
+          if (deleteButton) {
+            deleteButton.addEventListener('click', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              this.deleteElement(elementId);
+            });
+          }
+        }
+        
+        return highlightHost;
+      }
+      
+      // Fall back to classic highlighting
       const rect = element.getBoundingClientRect();
       
       // Create highlight container
@@ -785,6 +979,8 @@ function injectElementSelector() {
       highlight.appendChild(labelElement);
       highlight.appendChild(deleteButton);
       document.body.appendChild(highlight);
+      
+      return highlight;
     },
     
     // Delete a specific element by ID
@@ -795,10 +991,15 @@ function injectElementSelector() {
         return;
       }
       
-      // Remove highlight
-      const highlight = document.querySelector(`.browser-connect-element-highlight[data-element-id="${elementId}"]`);
-      if (highlight) {
-        highlight.remove();
+      // Remove highlight based on implementation
+      if (this.useShadowDOM && this.shadowDOMHighlighter) {
+        this.shadowDOMHighlighter.removeHighlight(elementId);
+      } else {
+        // Classic approach
+        const highlight = document.querySelector(`.browser-connect-element-highlight[data-element-id="${elementId}"]`);
+        if (highlight) {
+          highlight.remove();
+        }
       }
       
       // Remove from selected elements map
@@ -938,40 +1139,102 @@ function injectElementSelector() {
       return elements;
     },
     
+    // Highlight all selected elements
     highlightAllSelectedElements() {
-      // Re-highlight all selected elements
+      if (this.selectedElements.size === 0) {
+        console.log('No elements to highlight');
+        return false;
+      }
+      
+      console.log('Highlighting all elements');
+      
+      // When using Shadow DOM, elements are always visible
+      if (this.useShadowDOM) {
+        return true;
+      }
+      
+      // Classic approach
       this.selectedElements.forEach((data, elementId) => {
-        if (data.element && document.body.contains(data.element)) {
-          this.addPermanentHighlight(data.element, data.label, elementId);
+        const highlight = document.querySelector(`.browser-connect-element-highlight[data-element-id="${elementId}"]`);
+        if (highlight) {
+          highlight.style.display = 'block';
+        } else {
+          // Re-add the highlight if it's missing
+          if (data.element && document.body.contains(data.element)) {
+            this.addPermanentHighlight(data.element, data.label, elementId);
+          }
         }
       });
       
-      return { success: true };
+      return true;
     },
     
+    // Hide all selected elements
     hideAllSelectedElements() {
-      // Remove all highlight elements
-      const highlights = document.querySelectorAll('.browser-connect-element-highlight');
-      highlights.forEach(el => el.remove());
+      if (this.selectedElements.size === 0) {
+        console.log('No elements to hide');
+        return false;
+      }
       
-      return { success: true };
-    },
-    
-    clearAllSelectedElements(reason) {
-      // Clear all selected elements
-      this.selectedElements.clear();
-      console.log('All elements cleared:', reason);
+      console.log('Hiding all elements');
       
-      // Remove all highlights
-      this.hideAllSelectedElements();
+      // When using Shadow DOM, don't actually hide them
+      if (this.useShadowDOM) {
+        return true;
+      }
       
-      // Notify that elements were cleared
-      chrome.runtime.sendMessage({
-        type: 'elements-cleared',
-        reason: reason
+      // Classic approach
+      document.querySelectorAll('.browser-connect-element-highlight').forEach(highlight => {
+        highlight.style.display = 'none';
       });
       
-      return { success: true };
+      return true;
+    },
+    
+    // Clear all selected elements
+    clearAllSelectedElements(reason = 'manual') {
+      if (this.selectedElements.size === 0) {
+        console.log('No elements to clear');
+        return true;
+      }
+      
+      const elementIds = Array.from(this.selectedElements.keys());
+      console.log(`Clearing ${elementIds.length} elements due to: ${reason}`);
+      
+      // Remove highlights based on implementation
+      if (this.useShadowDOM && this.shadowDOMHighlighter) {
+        this.shadowDOMHighlighter.removeAllHighlights();
+      } else {
+        // Classic approach
+        document.querySelectorAll('.browser-connect-element-highlight').forEach(highlight => {
+          highlight.remove();
+        });
+      }
+      
+      // Clear the selected elements map
+      this.selectedElements.clear();
+      
+      // Emit socket event for bulk deletion
+      if (elementIds.length > 0) {
+        chrome.runtime.sendMessage({
+          type: 'socket-emit',
+          event: 'zones-deleted',
+          data: {
+            reason: reason,
+            elementIds: elementIds,
+            url: window.location.href,
+            timestamp: Date.now()
+          }
+        });
+        
+        // Also notify extension UI
+        chrome.runtime.sendMessage({
+          type: 'elements-cleared',
+          reason: reason
+        });
+      }
+      
+      return true;
     },
     
     // Create visual indicator for debugging purposes
@@ -1026,6 +1289,10 @@ function injectElementSelector() {
     }
   };
   
+  // Also expose to window for access by executeScript
+  window.elementSelector = elementSelector;
+  console.log('🔍 DEBUG: elementSelector exposed to window object');
+  
   // Continue with initialization
   try {
     elementSelector.setupEventListeners();
@@ -1070,28 +1337,45 @@ function verifyScriptContext() {
   return true;
 }
 
-// Main initialization function that runs when content script loads
-(function initialize() {
-  // Check for script context, but don't fail if we don't have full DOM access yet
-  if (!verifyScriptContext()) {
-    console.error('🚨 ERROR: Script context verification failed, aborting initialization');
-    
-    // Still set up message handler to be able to respond about our status
-    initializeMessageHandler();
-    return;
+// Set up window unload to clean up
+window.addEventListener('beforeunload', () => {
+  console.log('🔍 DEBUG: Window is unloading, cleaning up');
+  // Clean up ShadowDOM elements if they exist
+  if (elementSelector && elementSelector.shadowDOMHighlighter) {
+    elementSelector.shadowDOMHighlighter.cleanup();
   }
-  
-  // Always set up the message handler first, regardless of DOM state
-  initializeMessageHandler();
-  
-  // Wait for DOM to be fully loaded before creating any UI elements
-  waitForDOM(function() {
+});
+
+// Main initialization function
+(function initialize() {
+  // Wait for DOM to be ready, then initialize
+  waitForDOM(() => {
     console.log('🔍 DEBUG: DOM is ready, initializing element selector');
-    injectElementSelector();
+    
+    // Initialize messaging first to ensure we can receive messages
+    initializeMessageHandler();
+    
+    // Inject element selector
+    elementSelector = injectElementSelector();
+    
+    // Set browserConnectAPI as ready
+    if (window.browserConnectAPI) {
+      window.browserConnectAPI.isReady = true;
+      console.log('🔍 DEBUG: browserConnectAPI marked as ready');
+    }
+    
+    // Create visual debug indicator
+    elementSelector.createDebugIndicator();
+    
+    // Mark as successful
+    console.log('🔍 DEBUG: ElementSelector successfully initialized');
+    
+    // Send message that content script is ready
+    sendInitialReadyMessage();
   });
   
-  // Send initial content-script-ready message, response: { success: true, received: true }
-  console.log('🔍 DEBUG: Sent initial content-script-ready message');
+  // Verify that we're in the right context
+  verifyScriptContext();
 })();
 
 // Find element by ID, XPath, or CSS selector - to be used for screenshot capture
@@ -1134,4 +1418,330 @@ function findElementById(elementId) {
   // We couldn't find the element
   console.log('🔍 DEBUG: Element not found using any method');
   return null;
-} 
+}
+
+// Export a function for checking status from the console
+window.checkBrowserConnectStatus = function() {
+  const timestamp = new Date().toISOString();
+  console.log(`🔍 BROWSER CONNECT STATUS CHECK (${timestamp})`);
+  console.log(`📋 Content Script: ${typeof injectElementSelector === 'function' ? 'Loaded ✓' : 'Not loaded ✗'}`);
+  console.log(`🔧 ShadowDOMHighlighter: ${window.ShadowDOMHighlighter ? 'Available ✓' : 'Not available ✗'}`);
+  console.log(`🎯 elementSelector: ${window.elementSelector ? 'Initialized ✓' : 'Not initialized ✗'}`);
+  console.log(`🔌 browserConnectAPI: ${window.browserConnectAPI && window.browserConnectAPI.isReady ? 'Ready ✓' : 'Not ready ✗'}`);
+  
+  // Create visual indicator
+  try {
+    const indicator = document.createElement('div');
+    indicator.style.position = 'fixed';
+    indicator.style.top = '10px';
+    indicator.style.left = '10px';
+    indicator.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    indicator.style.color = 'white';
+    indicator.style.padding = '10px';
+    indicator.style.borderRadius = '5px';
+    indicator.style.zIndex = '2147483647';
+    indicator.style.fontFamily = 'monospace';
+    indicator.style.fontSize = '12px';
+    
+    indicator.innerHTML = `
+      <div style="font-weight:bold;margin-bottom:5px;">Browser Connect Status</div>
+      <div style="color:${typeof injectElementSelector === 'function' ? '#4CAF50' : '#F44336'}">
+        Content Script: ${typeof injectElementSelector === 'function' ? 'Loaded ✓' : 'Not loaded ✗'}
+      </div>
+      <div style="color:${window.ShadowDOMHighlighter ? '#4CAF50' : '#F44336'}">
+        ShadowDOMHighlighter: ${window.ShadowDOMHighlighter ? 'Available ✓' : 'Not available ✗'}
+      </div>
+      <div style="color:${window.elementSelector ? '#4CAF50' : '#F44336'}">
+        elementSelector: ${window.elementSelector ? 'Initialized ✓' : 'Not initialized ✗'}
+      </div>
+      <div style="color:${window.browserConnectAPI && window.browserConnectAPI.isReady ? '#4CAF50' : '#F44336'}">
+        browserConnectAPI: ${window.browserConnectAPI && window.browserConnectAPI.isReady ? 'Ready ✓' : 'Not ready ✗'}
+      </div>
+    `;
+    
+    document.body.appendChild(indicator);
+    
+    // Add close button
+    const closeBtn = document.createElement('div');
+    closeBtn.textContent = 'X';
+    closeBtn.style.position = 'absolute';
+    closeBtn.style.top = '5px';
+    closeBtn.style.right = '5px';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.fontWeight = 'bold';
+    closeBtn.addEventListener('click', () => indicator.remove());
+    indicator.appendChild(closeBtn);
+    
+    return {
+      success: true,
+      contentScript: typeof injectElementSelector === 'function',
+      shadowDOMHighlighter: !!window.ShadowDOMHighlighter,
+      elementSelector: !!window.elementSelector,
+      browserConnectAPI: !!(window.browserConnectAPI && window.browserConnectAPI.isReady),
+    };
+  } catch (error) {
+    console.error('Failed to create status indicator:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+// This function can be called from the console to manually initialize everything
+window.initializeBrowserConnect = function() {
+  console.log('🔍 BROWSER CONNECT: Manual initialization requested');
+  
+  try {
+    // Step 1: Check ShadowDOMHighlighter
+    let shadowDOMHighlighterAvailable = !!window.ShadowDOMHighlighter;
+    console.log(`🔍 Step 1: ShadowDOMHighlighter ${shadowDOMHighlighterAvailable ? 'available ✓' : 'not available ✗'}`);
+    
+    if (!shadowDOMHighlighterAvailable) {
+      console.log('🔍 Attempting to load ShadowDOMHighlighter from extension');
+      
+      // Create a temporary status indicator
+      const statusElement = document.createElement('div');
+      statusElement.style.position = 'fixed';
+      statusElement.style.top = '50%';
+      statusElement.style.left = '50%';
+      statusElement.style.transform = 'translate(-50%, -50%)';
+      statusElement.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+      statusElement.style.color = 'white';
+      statusElement.style.padding = '20px';
+      statusElement.style.borderRadius = '10px';
+      statusElement.style.zIndex = '2147483647';
+      statusElement.style.fontFamily = 'monospace';
+      statusElement.style.textAlign = 'center';
+      statusElement.innerHTML = '<div style="font-size:16px;margin-bottom:10px;font-weight:bold;">Initializing Browser Connect</div><div id="bc-init-status">Loading ShadowDOMHighlighter...</div>';
+      document.body.appendChild(statusElement);
+      
+      const updateStatus = (message, color = 'white') => {
+        const statusDiv = document.getElementById('bc-init-status');
+        if (statusDiv) {
+          statusDiv.innerHTML += `<div style="color:${color}">${message}</div>`;
+        }
+      };
+      
+      // Try to inject the script
+      try {
+        // Get URL from extension
+        const message = { type: 'direct-inject-scripts' };
+        
+        // Update status
+        updateStatus('Requesting direct injection from extension...', '#FFC107');
+        
+        // Send message to extension
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage(message, function(response) {
+            if (chrome.runtime.lastError) {
+              updateStatus(`Error: ${chrome.runtime.lastError.message}`, '#F44336');
+              setTimeout(() => statusElement.remove(), 5000);
+              return;
+            }
+            
+            if (response && response.success) {
+              updateStatus('Direct injection succeeded! ✓', '#4CAF50');
+              updateStatus('Verifying components...', '#2196F3');
+              
+              // Verify components after a short delay
+              setTimeout(() => {
+                const shadowDOMHighlighterAvailable = !!window.ShadowDOMHighlighter;
+                const elementSelectorAvailable = !!window.elementSelector;
+                const browserConnectAPIAvailable = !!(window.browserConnectAPI && window.browserConnectAPI.isReady);
+                
+                updateStatus(`ShadowDOMHighlighter: ${shadowDOMHighlighterAvailable ? 'Available ✓' : 'Not available ✗'}`, 
+                             shadowDOMHighlighterAvailable ? '#4CAF50' : '#F44336');
+                updateStatus(`elementSelector: ${elementSelectorAvailable ? 'Available ✓' : 'Not available ✗'}`, 
+                             elementSelectorAvailable ? '#4CAF50' : '#F44336');
+                updateStatus(`browserConnectAPI: ${browserConnectAPIAvailable ? 'Available ✓' : 'Not available ✗'}`, 
+                             browserConnectAPIAvailable ? '#4CAF50' : '#F44336');
+                
+                if (shadowDOMHighlighterAvailable && elementSelectorAvailable && browserConnectAPIAvailable) {
+                  updateStatus('All components ready! Browser Connect initialized successfully.', '#4CAF50');
+                } else {
+                  updateStatus('Some components failed to initialize.', '#F44336');
+                }
+                
+                // Remove status after delay
+                setTimeout(() => statusElement.remove(), 5000);
+              }, 1000);
+            } else {
+              updateStatus(`Error: ${response ? response.error : 'Unknown error'}`, '#F44336');
+              setTimeout(() => statusElement.remove(), 5000);
+            }
+          });
+        } else {
+          updateStatus('Error: Chrome runtime API not available', '#F44336');
+          setTimeout(() => statusElement.remove(), 5000);
+        }
+      } catch (error) {
+        updateStatus(`Error: ${error.message}`, '#F44336');
+        setTimeout(() => statusElement.remove(), 5000);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    } else {
+      console.log('🔍 ShadowDOMHighlighter already available, checking elementSelector');
+      
+      // Step 2: Create elementSelector if needed
+      if (!window.elementSelector) {
+        console.log('🔍 elementSelector not available, creating it');
+        
+        try {
+          // Create a simplified ElementSelector
+          window.elementSelector = {
+            selectionMode: false,
+            selectedElements: new Map(),
+            nextElementId: 1,
+            highlightedElement: null,
+            shadowDOMHighlighter: new window.ShadowDOMHighlighter(),
+            useShadowDOM: true,
+            
+            // Minimal version of required methods
+            toggleSelectionMode() {
+              console.log('🔍 DEBUG: Toggling selection mode');
+              this.selectionMode = !this.selectionMode;
+              
+              const indicator = document.createElement('div');
+              indicator.style.position = 'fixed';
+              indicator.style.bottom = '10px';
+              indicator.style.right = '10px';
+              indicator.style.backgroundColor = this.selectionMode ? 'rgba(0,200,0,0.9)' : 'rgba(200,0,0,0.9)';
+              indicator.style.color = 'white';
+              indicator.style.padding = '8px 15px';
+              indicator.style.borderRadius = '5px';
+              indicator.style.zIndex = '2147483647';
+              indicator.textContent = `Selection Mode: ${this.selectionMode ? 'ON' : 'OFF'}`;
+              document.body.appendChild(indicator);
+              
+              // Remove after 3 seconds
+              setTimeout(() => {
+                if (indicator.parentNode) {
+                  indicator.remove();
+                }
+              }, 3000);
+              
+              return this.selectionMode;
+            },
+            
+            // Initialize tracking
+            initializeTracking() {
+              console.log('🔍 DEBUG: Initializing tracking with ShadowDOMHighlighter');
+              this.shadowDOMHighlighter.setupElementTracking();
+              return true;
+            },
+            
+            // Debug indicator
+            createDebugIndicator(message = 'Manual Init: Success') {
+              try {
+                const indicator = document.createElement('div');
+                indicator.id = 'browser-connect-debug-indicator';
+                indicator.style.position = 'fixed';
+                indicator.style.bottom = '40px';
+                indicator.style.left = '10px';
+                indicator.style.backgroundColor = 'rgba(0,255,0,0.9)';
+                indicator.style.color = 'white';
+                indicator.style.padding = '8px 15px';
+                indicator.style.borderRadius = '5px';
+                indicator.style.zIndex = '2147483647';
+                indicator.style.fontFamily = 'monospace';
+                indicator.textContent = message;
+                document.body.appendChild(indicator);
+                
+                // Remove after 10 seconds
+                setTimeout(() => {
+                  if (indicator.parentNode) {
+                    indicator.remove();
+                  }
+                }, 10000);
+                
+                return true;
+              } catch (error) {
+                console.error('🚨 ERROR: Failed to create debug indicator:', error);
+                return false;
+              }
+            }
+          };
+          
+          // Initialize tracking
+          window.elementSelector.initializeTracking();
+          console.log('🔍 elementSelector created and initialized');
+        } catch (error) {
+          console.error('🚨 ERROR: Failed to create elementSelector:', error);
+          return {
+            success: false,
+            error: error.message
+          };
+        }
+      } else {
+        console.log('🔍 elementSelector already available');
+      }
+      
+      // Step 3: Create browserConnectAPI if needed
+      if (!window.browserConnectAPI || !window.browserConnectAPI.isReady) {
+        console.log('🔍 browserConnectAPI not available or not ready, creating it');
+        
+        try {
+          window.browserConnectAPI = {
+            isReady: true,
+            toggleSelectionMode: function() {
+              return window.elementSelector.toggleSelectionMode();
+            }
+          };
+          console.log('🔍 browserConnectAPI created and set to ready');
+        } catch (error) {
+          console.error('🚨 ERROR: Failed to create browserConnectAPI:', error);
+          return {
+            success: false,
+            error: error.message
+          };
+        }
+      } else {
+        console.log('🔍 browserConnectAPI already available and ready');
+      }
+      
+      // Create visual indicator of success
+      const indicator = document.createElement('div');
+      indicator.style.position = 'fixed';
+      indicator.style.top = '50%';
+      indicator.style.left = '50%';
+      indicator.style.transform = 'translate(-50%, -50%)';
+      indicator.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+      indicator.style.color = 'white';
+      indicator.style.padding = '20px';
+      indicator.style.borderRadius = '10px';
+      indicator.style.zIndex = '2147483647';
+      indicator.style.fontFamily = 'monospace';
+      indicator.style.textAlign = 'center';
+      indicator.innerHTML = '<div style="font-size:16px;margin-bottom:10px;font-weight:bold;">Browser Connect Initialized</div><div style="color:#4CAF50">All components are ready ✓</div>';
+      document.body.appendChild(indicator);
+      
+      // Remove after 5 seconds
+      setTimeout(() => {
+        if (indicator.parentNode) {
+          indicator.remove();
+        }
+      }, 5000);
+      
+      if (window.elementSelector && typeof window.elementSelector.createDebugIndicator === 'function') {
+        window.elementSelector.createDebugIndicator('Manual initialization successful');
+      }
+      
+      return {
+        success: true,
+        shadowDOMHighlighter: true,
+        elementSelector: true,
+        browserConnectAPI: true
+      };
+    }
+  } catch (error) {
+    console.error('🚨 ERROR: Exception during manual initialization:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}; 

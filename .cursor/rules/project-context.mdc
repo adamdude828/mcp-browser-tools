@@ -11,6 +11,7 @@ This document provides context about the MCP Browser Connect project for LLM ass
 1. browser_get_title - Get the title of the currently selected tab. 
 2. browser_get_zones - Get all the zones selected. 
 3. browser_get_zone_details -  Get the details from any one zone. 
+4. browser_refresh_zones - Refresh all zones to get updated content.
 
 
 ## Project Overview

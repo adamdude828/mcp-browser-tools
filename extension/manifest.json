@@ -28,7 +28,12 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["window.html"],
+      "resources": [
+        "window.html", 
+        "js/modules/ShadowDOMHighlighter.js",
+        "js/modules/*.js",
+        "js/direct/ShadowDOMHighlighter.js"
+      ],
       "matches": ["<all_urls>"]
     }
   ],

@@ -181,6 +181,74 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
     return true;
   }
+
+  if (message.type === 'verify-content-script') {
+    logDebug('Received verify-content-script request');
+    
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (tabs.length === 0) {
+        logError('No active tab found for verification');
+        sendResponse({ success: false, error: 'No active tab found' });
+        return;
+      }
+      
+      const activeTab = tabs[0];
+      logDebug('Verifying content script in active tab', { id: activeTab.id, url: activeTab.url });
+      
+      // Check if we can access the tab
+      if (!activeTab.url || activeTab.url.startsWith('chrome://') || 
+          activeTab.url.startsWith('edge://') || activeTab.url.startsWith('about:')) {
+        logError('Cannot verify restricted URL', activeTab.url);
+        sendResponse({ 
+          success: false, 
+          error: 'Cannot access this page due to browser restrictions', 
+          url: activeTab.url 
+        });
+        return;
+      }
+      
+      try {
+        const result = await verifyContentScript(activeTab.id);
+        sendResponse({ success: true, result, tabId: activeTab.id, url: activeTab.url });
+      } catch (error) {
+        logError('Error during content script verification', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    });
+    
+    return true; // Indicate we'll send response asynchronously
+  }
+
+  // Handle direct-inject-scripts message
+  if (message.type === 'direct-inject-scripts') {
+    logDebug('Received direct-inject-scripts request');
+    
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      if (tabs.length === 0) {
+        logError('No active tab found for direct injection');
+        sendResponse({ success: false, error: 'No active tab found' });
+        return;
+      }
+      
+      const activeTab = tabs[0];
+      logDebug('Performing direct script injection in active tab', { id: activeTab.id, url: activeTab.url });
+      
+      try {
+        const result = await injectDirectScripts(activeTab.id);
+        logDebug('Direct script injection complete', result);
+        sendResponse({
+          success: true,
+          message: 'Direct script injection completed',
+          result: result
+        });
+      } catch (error) {
+        logError('Direct script injection failed', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    });
+    
+    return true;
+  }
 });
 
 // Listen for keyboard commands
@@ -200,6 +268,135 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
       contentScriptReadyTabs.delete(tabId);
     }
   }
+});
+
+// Track tab changes to detect when a tab becomes active
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  logDebug('Tab activated', activeInfo);
+  
+  // Set a small delay before checking content script status
+  setTimeout(() => {
+    checkContentScriptStatus(activeInfo.tabId)
+      .then(status => {
+        logDebug('Content script status check for newly activated tab', { 
+          tabId: activeInfo.tabId, 
+          status: status 
+        });
+        
+        // If content script not loaded or not initialized, try to help by auto-injecting
+        if (!status.success || !status.initialized) {
+          logDebug('Content script not properly loaded, attempting automatic recovery');
+          
+          // Get tab info to make sure we're working with a compatible URL
+          chrome.tabs.get(activeInfo.tabId, (tab) => {
+            if (chrome.runtime.lastError) {
+              logError('Could not get tab info', chrome.runtime.lastError.message);
+              return;
+            }
+            
+            // Skip for restricted URLs
+            if (!tab.url || tab.url.startsWith('chrome://') || 
+                tab.url.startsWith('edge://') || tab.url.startsWith('about:')) {
+              logDebug('Skipping content script recovery for restricted URL', tab.url);
+              return;
+            }
+            
+            // Try to inject content script
+            logDebug('Automatically injecting content script to aid debugging');
+            
+            // First try to display a diagnostic indicator in the page
+            chrome.scripting.executeScript({
+              target: { tabId: activeInfo.tabId },
+              function: () => {
+                try {
+                  console.log('🔍 BROWSER CONNECT: Diagnostic check running');
+                  
+                  // Create diagnostic log in page
+                  const diagnostic = document.createElement('div');
+                  diagnostic.id = 'browser-connect-diagnostic';
+                  diagnostic.style.position = 'fixed';
+                  diagnostic.style.bottom = '10px';
+                  diagnostic.style.right = '10px';
+                  diagnostic.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                  diagnostic.style.color = 'white';
+                  diagnostic.style.padding = '10px';
+                  diagnostic.style.borderRadius = '5px';
+                  diagnostic.style.zIndex = '2147483647';
+                  diagnostic.style.maxWidth = '300px';
+                  diagnostic.style.maxHeight = '200px';
+                  diagnostic.style.overflow = 'auto';
+                  diagnostic.style.fontFamily = 'monospace';
+                  diagnostic.style.fontSize = '12px';
+                  diagnostic.style.boxShadow = '0 0 10px rgba(0, 0, 0, 0.5)';
+                  
+                  // Add diagnostic information
+                  const addLog = (message, type = 'info') => {
+                    const entry = document.createElement('div');
+                    entry.style.marginBottom = '5px';
+                    entry.style.borderLeft = `3px solid ${type === 'error' ? 'red' : type === 'warning' ? 'orange' : 'green'}`;
+                    entry.style.paddingLeft = '5px';
+                    entry.textContent = message;
+                    diagnostic.appendChild(entry);
+                  };
+                  
+                  addLog('Browser Connect Diagnostic', 'info');
+                  addLog(`URL: ${window.location.href}`, 'info');
+                  addLog(`Time: ${new Date().toISOString()}`, 'info');
+                  
+                  // Check for script objects
+                  addLog(`ShadowDOMHighlighter: ${window.ShadowDOMHighlighter ? 'Found ✓' : 'Missing ✗'}`, 
+                         window.ShadowDOMHighlighter ? 'info' : 'error');
+                  
+                  addLog(`elementSelector: ${window.elementSelector ? 'Found ✓' : 'Missing ✗'}`, 
+                         window.elementSelector ? 'info' : 'error');
+                  
+                  addLog(`browserConnectAPI: ${window.browserConnectAPI ? 'Found ✓' : 'Missing ✗'}`, 
+                         window.browserConnectAPI ? 'info' : 'error');
+                  
+                  document.body.appendChild(diagnostic);
+                  
+                  // Remove after 20 seconds
+                  setTimeout(() => {
+                    if (diagnostic.parentNode) {
+                      diagnostic.remove();
+                    }
+                  }, 20000);
+                  
+                  return {
+                    success: true,
+                    shadowDOMHighlighter: !!window.ShadowDOMHighlighter,
+                    elementSelector: !!window.elementSelector,
+                    browserConnectAPI: !!window.browserConnectAPI,
+                    location: window.location.href
+                  };
+                } catch (error) {
+                  console.error('Error creating diagnostic element:', error);
+                  return { success: false, error: error.message };
+                }
+              }
+            }).then(results => {
+              logDebug('Diagnostic script executed', results[0]?.result);
+              
+              // Now try to inject content script if needed
+              if (!status.success || !status.initialized) {
+                injectContentScript(activeInfo.tabId)
+                  .then(result => {
+                    logDebug('Auto-injection result', result);
+                  })
+                  .catch(error => {
+                    logError('Auto-injection failed', error);
+                  });
+              }
+            }).catch(error => {
+              logError('Diagnostic script execution failed', error);
+            });
+          });
+        }
+      })
+      .catch(error => {
+        logError('Error checking content script status', error);
+      });
+  }, 1000); // Delay to give the tab time to fully load
 });
 
 // Function to toggle selection mode
@@ -711,4 +908,294 @@ function updateServerUrl(url) {
     return true;
   }
   return false;
+}
+
+// Function to verify if the content script is loaded in a tab
+function verifyContentScript(tabId) {
+  logDebug('Verifying content script in tab', tabId);
+  
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.tabs.sendMessage(tabId, { type: 'content-script-ready-check' }, (response) => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          logError('Content script verification failed', error.message);
+          resolve({ 
+            loaded: false, 
+            error: error.message,
+            message: 'Content script not loaded or not responsive' 
+          });
+          return;
+        }
+        
+        if (!response) {
+          logError('Content script verification - no response');
+          resolve({ 
+            loaded: false, 
+            error: 'No response from content script',
+            message: 'Content script did not respond to verification' 
+          });
+          return;
+        }
+        
+        logDebug('Content script verification success', response);
+        resolve({ 
+          loaded: true, 
+          initialized: response.initialized || false,
+          domReady: response.domReady || false,
+          message: 'Content script is loaded and responsive' 
+        });
+      });
+    } catch (error) {
+      logError('Error during content script verification', error.message);
+      resolve({ 
+        loaded: false, 
+        error: error.message,
+        message: 'Exception during content script verification' 
+      });
+    }
+  });
+}
+
+// Last resort function to inject both required scripts directly
+function injectDirectScripts(tabId) {
+  logDebug(`Performing direct script injection for tab ${tabId}`);
+  
+  return new Promise((resolve, reject) => {
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError) {
+        logError('Could not get tab info', chrome.runtime.lastError.message);
+        reject(chrome.runtime.lastError);
+        return;
+      }
+      
+      // Skip for restricted URLs
+      if (!tab.url || tab.url.startsWith('chrome://') || 
+          tab.url.startsWith('edge://') || tab.url.startsWith('about:')) {
+        logError('Cannot inject scripts to restricted URL', tab.url);
+        reject(new Error('Cannot inject to restricted URL'));
+        return;
+      }
+      
+      // Get the extension URLs for our scripts
+      const shadowDOMUrl = chrome.runtime.getURL('js/direct/ShadowDOMHighlighter.js');
+      
+      // 1. First, inject the ShadowDOMHighlighter script
+      chrome.scripting.executeScript({
+        target: { tabId },
+        function: injectScriptTag,
+        args: [shadowDOMUrl, 'ShadowDOMHighlighter']
+      }).then(result1 => {
+        logDebug('ShadowDOMHighlighter injection result', result1);
+        
+        // 2. Wait a moment to ensure ShadowDOMHighlighter has loaded
+        setTimeout(() => {
+          // 3. Now create the elementSelector directly in the page
+          chrome.scripting.executeScript({
+            target: { tabId },
+            function: createElementSelector
+          }).then(result2 => {
+            logDebug('ElementSelector creation result', result2);
+            resolve({
+              success: true,
+              shadowDOMResult: result1[0]?.result,
+              elementSelectorResult: result2[0]?.result
+            });
+          }).catch(error2 => {
+            logError('ElementSelector creation failed', error2);
+            reject(error2);
+          });
+        }, 500);
+      }).catch(error1 => {
+        logError('ShadowDOMHighlighter injection failed', error1);
+        reject(error1);
+      });
+    });
+  });
+}
+
+// Helper function to inject a script tag - runs in page context
+function injectScriptTag(scriptUrl, scriptName) {
+  try {
+    console.log(`🔍 DEBUG: Injecting ${scriptName} script tag from ${scriptUrl}`);
+    
+    // First, remove any existing script with same id
+    const existingScript = document.getElementById(`bc-${scriptName}`);
+    if (existingScript) {
+      console.log(`🔍 DEBUG: Removing existing ${scriptName} script`);
+      existingScript.remove();
+    }
+    
+    // Create a new script element
+    const script = document.createElement('script');
+    script.id = `bc-${scriptName}`;
+    script.src = scriptUrl;
+    script.type = 'text/javascript';
+    
+    // Create a promise to track loading
+    return new Promise((resolve, reject) => {
+      script.onload = () => {
+        console.log(`🔍 DEBUG: ${scriptName} script loaded successfully`);
+        
+        // For ShadowDOMHighlighter, check if it actually registered globally
+        if (scriptName === 'ShadowDOMHighlighter') {
+          if (window.ShadowDOMHighlighter) {
+            console.log('🔍 DEBUG: ShadowDOMHighlighter found in window object ✓');
+            resolve({ success: true, registered: true });
+          } else {
+            console.error('🚨 ERROR: ShadowDOMHighlighter not found in window object after loading ✗');
+            resolve({ success: true, registered: false });
+          }
+        } else {
+          resolve({ success: true });
+        }
+      };
+      
+      script.onerror = (error) => {
+        console.error(`🚨 ERROR: Failed to load ${scriptName} script:`, error);
+        reject({ success: false, error: 'Script loading failed' });
+      };
+      
+      // Add to document head
+      document.head.appendChild(script);
+      console.log(`🔍 DEBUG: ${scriptName} script tag added to document`);
+    });
+  } catch (error) {
+    console.error(`🚨 ERROR: Exception injecting ${scriptName} script:`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Function to create elementSelector directly in the page context
+function createElementSelector() {
+  try {
+    console.log('🔍 DEBUG: Creating elementSelector directly');
+    
+    // Verify ShadowDOMHighlighter is available
+    if (!window.ShadowDOMHighlighter) {
+      console.error('🚨 ERROR: ShadowDOMHighlighter not available, cannot create elementSelector');
+      
+      // Create a visual indicator
+      const indicator = document.createElement('div');
+      indicator.style.position = 'fixed';
+      indicator.style.top = '10px';
+      indicator.style.left = '10px';
+      indicator.style.backgroundColor = 'rgba(255,0,0,0.9)';
+      indicator.style.color = 'white';
+      indicator.style.padding = '10px';
+      indicator.style.borderRadius = '5px';
+      indicator.style.zIndex = '2147483647';
+      indicator.style.fontFamily = 'monospace';
+      indicator.textContent = 'ERROR: ShadowDOMHighlighter not available ✗';
+      document.body.appendChild(indicator);
+      
+      // Remove after 10 seconds
+      setTimeout(() => {
+        if (indicator.parentNode) {
+          indicator.remove();
+        }
+      }, 10000);
+      
+      return { success: false, error: 'ShadowDOMHighlighter not available' };
+    }
+    
+    // Create the basic elementSelector object
+    window.elementSelector = {
+      selectionMode: false,
+      selectedElements: new Map(),
+      nextElementId: 1,
+      highlightedElement: null,
+      
+      // Initialize shadow DOM highlighter
+      shadowDOMHighlighter: new window.ShadowDOMHighlighter(),
+      useShadowDOM: true,
+      
+      // Minimal version of required methods
+      toggleSelectionMode() {
+        console.log('🔍 DEBUG: Toggling selection mode');
+        this.selectionMode = !this.selectionMode;
+        
+        const indicator = document.createElement('div');
+        indicator.style.position = 'fixed';
+        indicator.style.bottom = '10px';
+        indicator.style.right = '10px';
+        indicator.style.backgroundColor = this.selectionMode ? 'rgba(0,200,0,0.9)' : 'rgba(200,0,0,0.9)';
+        indicator.style.color = 'white';
+        indicator.style.padding = '8px 15px';
+        indicator.style.borderRadius = '5px';
+        indicator.style.zIndex = '2147483647';
+        indicator.textContent = `Selection Mode: ${this.selectionMode ? 'ON' : 'OFF'}`;
+        document.body.appendChild(indicator);
+        
+        // Remove after 3 seconds
+        setTimeout(() => {
+          if (indicator.parentNode) {
+            indicator.remove();
+          }
+        }, 3000);
+        
+        return this.selectionMode;
+      },
+      
+      // Placeholder for other methods
+      initializeTracking() {
+        console.log('🔍 DEBUG: Initializing tracking with ShadowDOMHighlighter');
+        this.shadowDOMHighlighter.setupElementTracking();
+        return true;
+      },
+      
+      createDebugIndicator(message = 'Direct Injection: Success') {
+        try {
+          const indicator = document.createElement('div');
+          indicator.id = 'browser-connect-debug-indicator';
+          indicator.style.position = 'fixed';
+          indicator.style.bottom = '40px';
+          indicator.style.left = '10px';
+          indicator.style.backgroundColor = 'rgba(0,255,0,0.9)';
+          indicator.style.color = 'white';
+          indicator.style.padding = '8px 15px';
+          indicator.style.borderRadius = '5px';
+          indicator.style.zIndex = '2147483647';
+          indicator.style.fontFamily = 'monospace';
+          indicator.textContent = message;
+          document.body.appendChild(indicator);
+          
+          // Remove after 10 seconds
+          setTimeout(() => {
+            if (indicator.parentNode) {
+              indicator.remove();
+            }
+          }, 10000);
+          
+          return true;
+        } catch (error) {
+          console.error('🚨 ERROR: Failed to create debug indicator:', error);
+          return false;
+        }
+      }
+    };
+    
+    // Create window.browserConnectAPI
+    window.browserConnectAPI = {
+      isReady: true,
+      toggleSelectionMode: function() {
+        return window.elementSelector.toggleSelectionMode();
+      }
+    };
+    
+    // Initialize tracking
+    window.elementSelector.initializeTracking();
+    
+    // Create a visual indicator of success
+    window.elementSelector.createDebugIndicator('Direct Injection: elementSelector created successfully ✓');
+    
+    return { 
+      success: true,
+      elementSelector: !!window.elementSelector,
+      browserConnectAPI: !!window.browserConnectAPI
+    };
+  } catch (error) {
+    console.error('🚨 ERROR: Exception creating elementSelector:', error);
+    return { success: false, error: error.message };
+  }
 } 
